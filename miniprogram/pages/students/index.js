@@ -130,6 +130,29 @@ Page({
     });
   },
 
+  // 学生改过密码又忘记时无法自助找回，只能由教师重置
+  async onResetPassword(e) {
+    const { key, name } = e.currentTarget.dataset;
+    const ok = await util.confirm(
+      `将把「${name}」的密码重置为 student，并解除其微信绑定，` +
+        '该学生需要用初始密码重新登录。确定重置吗？',
+      '重置密码'
+    );
+    if (!ok) return;
+    try {
+      const res = await api.call('student.resetPassword', { account: key });
+      wx.showModal({
+        title: '重置成功',
+        content:
+          `${res.name}\n登录账号：${res.loginAccount}\n初始密码：${res.initialPassword}\n\n` +
+          '请提醒该学生登录后立即修改密码。',
+        showCancel: false,
+      });
+    } catch (err) {
+      // 错误提示已在 api 层弹出
+    }
+  },
+
   onGotoClasses() {
     wx.navigateTo({ url: '/pages/classes/index' });
   },

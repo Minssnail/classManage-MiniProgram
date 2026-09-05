@@ -52,6 +52,9 @@ cloudfunctions/
 登录成功后，该微信号会与账号绑定，下次进入自动登录；「我的 → 退出登录」可解绑。
 学号与手机号是同一个账号的两个登录入口，学号补录后两者都能继续登录。
 
+学生自行改过密码又忘记时无法自助找回，由教师在「学生管理」里点该生的「重置密码」处理：
+密码恢复为 `student`，同时解除微信绑定，学生换手机或账号被别人登录过都能重新登入。
+
 ## 三、班级
 
 一位教师可以带多个班级，全系统的数据都按班级隔离。
@@ -139,7 +142,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 系统 | `system.init`、`system.importLegacy`、`system.legacyStatus` |
 | 认证 | `auth.login`、`auth.me`、`auth.logout`、`auth.changePassword` |
 | 班级 | `class.list`、`class.create`、`class.rename`、`class.remove`、`class.setStartSemester`、`class.importRoster` |
-| 学生 | `student.list`、`student.add`、`student.assignStudentId` |
+| 学生 | `student.list`、`student.add`、`student.assignStudentId`、`student.resetPassword` |
 | 积分 | `score.add`、`score.list` |
 | 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.manualCheckin`、`attendance.today` |
 | 奖励 | `reward.add`、`reward.list`、`reward.redeem`、`reward.unredeem` |

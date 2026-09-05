@@ -27,6 +27,11 @@
   color: var(--warning);
 }
 
-.assign-btn {
+.row-actions {
+  display: flex;
   margin-top: 14rpx;
+}
+
+.row-actions .btn {
+  margin-right: 16rpx;
 }

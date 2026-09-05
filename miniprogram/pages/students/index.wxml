@@ -41,14 +41,24 @@
           <text class="{{item.studentIdAssigned ? '' : 'pending'}}">{{item.idLabel}}</text>
           <text wx:if="{{item.subLabel}}"> · {{item.subLabel}}</text>
         </view>
-        <view
-          wx:if="{{!item.studentIdAssigned}}"
-          class="btn btn-ghost btn-sm assign-btn"
-          data-key="{{item.studentId}}"
-          data-name="{{item.name}}"
-          bindtap="onAssignStudentId"
-        >
-          补录学号
+        <view class="row-actions">
+          <view
+            wx:if="{{!item.studentIdAssigned}}"
+            class="btn btn-ghost btn-sm"
+            data-key="{{item.studentId}}"
+            data-name="{{item.name}}"
+            bindtap="onAssignStudentId"
+          >
+            补录学号
+          </view>
+          <view
+            class="btn btn-plain btn-sm"
+            data-key="{{item.studentId}}"
+            data-name="{{item.name}}"
+            bindtap="onResetPassword"
+          >
+            重置密码
+          </view>
         </view>
       </view>
       <view class="aside">

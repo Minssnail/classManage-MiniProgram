@@ -16,7 +16,7 @@
     "backgroundColor": "#f2f4f8",
     "backgroundTextStyle": "light",
     "navigationBarBackgroundColor": "#3b5bdb",
-    "navigationBarTitleText": "班级积分管理",
+    "navigationBarTitleText": "班级管理",
     "navigationBarTextStyle": "white"
   },
   "tabBar": {

@@ -676,6 +676,42 @@ actions['student.assignStudentId'] = async ({ user, payload }) => {
   return { message: `已为${student.name}分配学号 ${studentId}` };
 };
 
+/**
+ * 重置学生密码。
+ * 学生自行改过密码又忘记时无法自助找回，只能由教师重置。
+ * 同时解除微信绑定，学生换手机或账号被别人登录过都能重新用初始密码登入。
+ */
+actions['student.resetPassword'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const account = String(payload.account || payload.studentId || '').trim();
+  if (!account) fail('请提供学号或手机号');
+
+  // 学号和手机号都能定位到学生
+  let res = await db.collection('students').where({ studentId: account }).limit(1).get();
+  if (!res.data.length) {
+    res = await db.collection('students').where({ phone: account }).limit(1).get();
+  }
+  const student = res.data[0];
+  if (!student) fail('未找到该学生：' + account);
+
+  const accounts = await db.collection('users').where({ studentId: student.studentId }).get();
+  if (!accounts.data.length) fail(`${student.name} 尚未开通账号，请先在学生管理中重新添加`);
+
+  const { salt, hash } = hashPassword(STUDENT_INITIAL_PASSWORD);
+  for (const u of accounts.data) {
+    await db.collection('users').doc(u._id).update({
+      data: { passwordSalt: salt, passwordHash: hash, openid: null },
+    });
+  }
+
+  return {
+    message: `${student.name} 的密码已重置为 ${STUDENT_INITIAL_PASSWORD}`,
+    name: student.name,
+    loginAccount: accounts.data[0].username,
+    initialPassword: STUDENT_INITIAL_PASSWORD,
+  };
+};
+
 // ---------- 班级 ----------
 
 // 保证班级存在于 classes 集合，避免只在学生记录里出现的“隐形班级”
