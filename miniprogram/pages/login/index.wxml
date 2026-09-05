@@ -1,7 +1,6 @@
 <view class="login">
   <view class="hero">
-    <view class="logo">积</view>
-    <view class="app-name">班级积分管理系统</view>
+    <view class="app-name">班级管理系统</view>
     <view class="app-desc">考勤 · 积分 · 奖励 一站式管理</view>
   </view>
 

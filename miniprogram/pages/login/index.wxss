@@ -6,22 +6,8 @@
 }
 
 .hero {
-  padding: 70rpx 0 80rpx;
+  padding: 130rpx 0 80rpx;
   color: #fff;
-}
-
-.logo {
-  width: 108rpx;
-  height: 108rpx;
-  border-radius: 30rpx;
-  background: rgba(255, 255, 255, 0.22);
-  color: #fff;
-  font-size: 52rpx;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 32rpx;
 }
 
 .app-name {
