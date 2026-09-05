@@ -1,0 +1,60 @@
+<view class="page">
+  <view class="class-bar">
+    <text class="current">{{className || '未选择班级'}}</text>
+    <text class="link" bindtap="onGotoClasses">切换班级</text>
+  </view>
+
+  <view class="card">
+    <view class="card-title">添加学生</view>
+    <view class="field">
+      <view class="field-label">姓名</view>
+      <input class="input" placeholder="学生姓名" value="{{name}}" data-field="name" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <view class="field-label">学号（新生未分配可留空）</view>
+      <input class="input" placeholder="学号" value="{{studentId}}" data-field="studentId" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <view class="field-label">手机号</view>
+      <input class="input" type="number" placeholder="11 位手机号" value="{{phone}}" data-field="phone" bindinput="onInput" />
+    </view>
+    <button class="btn btn-primary" loading="{{submitting}}" disabled="{{!className}}" bindtap="onAdd">
+      添加学生
+    </button>
+    <view class="muted tip">
+      学号和手机号至少填一个。未分配学号时以手机号登录，学号下发后可在下方补录；
+      两者都可作为登录账号，初始密码 student。
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">
+      学生名单
+      <text class="sub">
+        共 {{students.length}} 人<text wx:if="{{pendingCount}}"> · {{pendingCount}} 人待分配学号</text>
+      </text>
+    </view>
+    <view wx:for="{{students}}" wx:key="_id" class="list-item">
+      <view class="main">
+        <view class="title">{{item.name}}</view>
+        <view class="desc">
+          <text class="{{item.studentIdAssigned ? '' : 'pending'}}">{{item.idLabel}}</text>
+          <text wx:if="{{item.subLabel}}"> · {{item.subLabel}}</text>
+        </view>
+        <view
+          wx:if="{{!item.studentIdAssigned}}"
+          class="btn btn-ghost btn-sm assign-btn"
+          data-key="{{item.studentId}}"
+          data-name="{{item.name}}"
+          bindtap="onAssignStudentId"
+        >
+          补录学号
+        </view>
+      </view>
+      <view class="aside">
+        <text class="badge badge-success">{{item.totalScore}} 分</text>
+      </view>
+    </view>
+    <view wx:if="{{loaded && !students.length}}" class="empty">该班级暂无学生</view>
+  </view>
+</view>

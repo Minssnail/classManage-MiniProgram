@@ -1,0 +1,77 @@
+<view class="page">
+  <view class="card">
+    <view class="card-title">新建班级</view>
+    <view class="field">
+      <input
+        class="input"
+        placeholder="例如：26秋计算机网络技术班"
+        value="{{newName}}"
+        data-field="newName"
+        bindinput="onInput"
+      />
+    </view>
+    <view class="btn-row">
+      <button class="btn btn-primary" loading="{{creating}}" bindtap="onCreate">创建班级</button>
+      <button class="btn btn-ghost" bindtap="onImportRoster">导入名册</button>
+    </view>
+    <view class="muted tip">
+      「导入名册」会导入随包携带的新生名册。新生尚未分配学号，以手机号登录，初始密码 student；
+      学号下发后可在学生管理里逐个补录。新建班级默认以当前学期为入学学期，
+      入学之前的学期不会出现在该班的学期切换里。
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">
+      班级列表
+      <text class="sub">共 {{classes.length}} 个</text>
+    </view>
+
+    <view wx:for="{{classes}}" wx:key="name" class="class-item">
+      <view class="head">
+        <view class="title">
+          {{item.name}}
+          <text wx:if="{{item.name === currentClass}}" class="badge badge-brand">当前</text>
+        </view>
+        <view class="desc">
+          {{item.studentCount}} 名学生
+          <text wx:if="{{item.pendingStudentId}}" class="pending">
+            · {{item.pendingStudentId}} 人待分配学号
+          </text>
+        </view>
+        <view class="desc">
+          入学学期：{{item.startSemesterName || (item.startDate ? item.startDate : '未设置（可看全部学期）')}}
+        </view>
+      </view>
+      <view class="actions">
+        <view
+          wx:if="{{item.name !== currentClass}}"
+          class="btn btn-ghost btn-sm"
+          data-name="{{item.name}}"
+          bindtap="onSetCurrent"
+        >
+          设为当前
+        </view>
+        <view class="btn btn-plain btn-sm" data-name="{{item.name}}" bindtap="onOpenStudents">
+          学生名单
+        </view>
+        <view class="btn btn-plain btn-sm" data-name="{{item.name}}" bindtap="onSetStartSemester">
+          入学学期
+        </view>
+        <view class="btn btn-plain btn-sm" data-name="{{item.name}}" bindtap="onRename">
+          重命名
+        </view>
+        <view
+          wx:if="{{!item.studentCount}}"
+          class="btn btn-danger btn-sm"
+          data-name="{{item.name}}"
+          bindtap="onRemove"
+        >
+          删除
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{loaded && !classes.length}}" class="empty">暂无班级，先创建一个或导入名册</view>
+  </view>
+</view>

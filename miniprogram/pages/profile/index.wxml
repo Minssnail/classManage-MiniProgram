@@ -1,0 +1,102 @@
+<view class="page">
+  <view class="profile-card">
+    <view class="avatar">{{isTeacher ? '师' : '生'}}</view>
+    <view class="info">
+      <view class="name">{{displayName}}</view>
+      <view class="role">{{isTeacher ? '教师' : '学生'}} · {{semesterLabel}}</view>
+    </view>
+    <view class="score" wx:if="{{!isTeacher && myTotalScore !== null}}">
+      <view class="score-value">{{myTotalScore}}</view>
+      <view class="score-label">本学期积分</view>
+    </view>
+  </view>
+
+  <!-- 教师专属功能 -->
+  <view class="card menu" wx:if="{{isTeacher}}">
+    <view class="section-title">教学管理</view>
+    <view class="menu-item" data-url="/pages/classes/index" bindtap="onNavigate">
+      <text>班级管理</text>
+      <text class="chevron">›</text>
+    </view>
+    <view class="menu-item" data-url="/pages/score-manage/index" bindtap="onNavigate">
+      <text>积分管理</text>
+      <text class="chevron">›</text>
+    </view>
+    <view class="menu-item" data-url="/pages/students/index" bindtap="onNavigate">
+      <text>学生管理</text>
+      <text class="chevron">›</text>
+    </view>
+    <view class="menu-item" data-url="/pages/rewards/index" bindtap="onNavigate">
+      <text>奖励管理</text>
+      <text class="chevron">›</text>
+    </view>
+    <view class="menu-item" data-url="/pages/semesters/index" bindtap="onNavigate">
+      <text>学期管理</text>
+      <text class="chevron">›</text>
+    </view>
+    <view class="menu-item" bindtap="onImportLegacy">
+      <view>
+        <text>导入历史数据</text>
+        <view class="menu-desc">从 Web 版迁移积分与奖励记录，可重复执行</view>
+      </view>
+      <text class="chevron">›</text>
+    </view>
+  </view>
+
+  <view class="card menu">
+    <view class="section-title">数据与账号</view>
+    <view class="menu-item" data-url="/pages/statistics/index" bindtap="onNavigate">
+      <text>统计分析</text>
+      <text class="chevron">›</text>
+    </view>
+    <view class="menu-item" bindtap="onShowPassword">
+      <text>修改密码</text>
+      <text class="chevron">›</text>
+    </view>
+  </view>
+
+  <button class="btn btn-danger logout" bindtap="onLogout">退出登录</button>
+
+  <!-- 修改密码浮层 -->
+  <view class="modal-mask" wx:if="{{passwordVisible}}" bindtap="onHidePassword">
+    <view class="modal" catchtap="onNoop">
+      <view class="card-title">修改密码</view>
+      <view class="field">
+        <view class="field-label">旧密码</view>
+        <input
+          class="input"
+          password
+          value="{{oldPassword}}"
+          data-field="oldPassword"
+          bindinput="onPasswordInput"
+        />
+      </view>
+      <view class="field">
+        <view class="field-label">新密码（至少 6 位）</view>
+        <input
+          class="input"
+          password
+          value="{{newPassword}}"
+          data-field="newPassword"
+          bindinput="onPasswordInput"
+        />
+      </view>
+      <view class="field">
+        <view class="field-label">确认新密码</view>
+        <input
+          class="input"
+          password
+          value="{{confirmPassword}}"
+          data-field="confirmPassword"
+          bindinput="onPasswordInput"
+        />
+      </view>
+      <view class="btn-row">
+        <button class="btn btn-plain" bindtap="onHidePassword">取消</button>
+        <button class="btn btn-primary" loading="{{submitting}}" bindtap="onSubmitPassword">
+          确认修改
+        </button>
+      </view>
+    </view>
+  </view>
+</view>

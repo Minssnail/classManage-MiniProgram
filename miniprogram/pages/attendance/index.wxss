@@ -1,0 +1,182 @@
+/* ---------- 教师端二维码 ---------- */
+.qr-card {
+  text-align: center;
+}
+
+.qr-stage {
+  position: relative;
+  width: 440rpx;
+  height: 440rpx;
+  margin: 10rpx auto 24rpx;
+  border-radius: 20rpx;
+  background: #fff;
+  border: 2rpx solid var(--border);
+  overflow: hidden;
+}
+
+.qr-canvas {
+  width: 440rpx;
+  height: 440rpx;
+  display: block;
+}
+
+.qr-canvas.dim {
+  opacity: 0.12;
+}
+
+.qr-mask {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  color: var(--text-muted);
+}
+
+.qr-mask.expired {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.countdown {
+  font-size: 26rpx;
+  color: var(--text-muted);
+  margin-bottom: 24rpx;
+}
+
+.countdown-num {
+  font-size: 40rpx;
+  font-weight: 600;
+  color: var(--brand);
+  padding: 0 6rpx;
+}
+
+.ttl-row {
+  display: flex;
+  align-items: center;
+}
+
+.ttl-picker {
+  flex: 1;
+  text-align: left;
+  margin-right: 20rpx;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.switch-row .muted {
+  margin-right: 8rpx;
+}
+
+.hint {
+  font-size: 23rpx;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-top: 22rpx;
+  text-align: left;
+}
+
+/* ---------- 学生端状态卡 ---------- */
+.status-card {
+  text-align: center;
+  padding: 50rpx 28rpx;
+}
+
+.status-icon {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 50%;
+  margin: 0 auto 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 52rpx;
+  font-weight: 600;
+}
+
+.status-card.done .status-icon {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.status-card.pending .status-icon {
+  background: var(--warning-light);
+  color: var(--warning);
+}
+
+.status-text {
+  font-size: 34rpx;
+  font-weight: 600;
+}
+
+.status-desc {
+  font-size: 24rpx;
+  color: var(--text-muted);
+  margin-top: 10rpx;
+}
+
+.scan-btn {
+  font-size: 32rpx;
+  padding: 28rpx 0;
+}
+
+.step {
+  font-size: 26rpx;
+  color: var(--text-muted);
+  line-height: 1.8;
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 14rpx;
+}
+
+.step:last-child {
+  margin-bottom: 0;
+}
+
+.step-no {
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+  background: var(--brand-light);
+  color: var(--brand);
+  font-size: 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 16rpx;
+  margin-top: 6rpx;
+  flex-shrink: 0;
+}
+
+.class-tip {
+  background: var(--warning-light);
+  color: #8a5300;
+  border-radius: 12rpx;
+  padding: 16rpx 20rpx;
+  font-size: 24rpx;
+  margin-bottom: 20rpx;
+  text-align: left;
+}
+
+.class-tip .link {
+  color: var(--brand);
+  margin-left: 12rpx;
+}
+
+.status-class {
+  display: inline-block;
+  margin-top: 16rpx;
+  font-size: 22rpx;
+  color: var(--brand);
+  background: var(--brand-light);
+  padding: 4rpx 20rpx;
+  border-radius: 999rpx;
+}

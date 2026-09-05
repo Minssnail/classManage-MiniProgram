@@ -1,0 +1,37 @@
+<view class="page">
+  <view class="card">
+    <view class="card-title">
+      {{trendTitle}}
+      <text class="sub">{{className || '全部班级'}} · {{semesterLabel}}</text>
+    </view>
+
+    <view class="chart">
+      <view wx:for="{{bars}}" wx:key="label" class="chart-col">
+        <view class="chart-value">{{item.value}}</view>
+        <view class="chart-bar-wrap">
+          <view class="chart-bar" style="height: {{item.percent}}%"></view>
+        </view>
+        <view class="chart-label">{{item.label}}</view>
+      </view>
+    </view>
+
+    <view class="chart-foot">
+      <text>7 天累计 {{totalWeek}} 分</text>
+      <text class="muted">单日最高 {{maxValue}} 分</text>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">积分类型占比</view>
+    <view wx:for="{{typeBars}}" wx:key="label" class="bar-row">
+      <view class="bar-head">
+        <text>{{item.label}}</text>
+        <text class="muted">{{item.value}} 分 · {{item.share}}%</text>
+      </view>
+      <view class="bar-track">
+        <view class="bar-fill" style="width: {{item.percent}}%"></view>
+      </view>
+    </view>
+    <view wx:if="{{loaded && !typeBars.length}}" class="empty">暂无统计数据</view>
+  </view>
+</view>

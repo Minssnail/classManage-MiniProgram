@@ -1,0 +1,33 @@
+<view class="login">
+  <view class="hero">
+    <view class="logo">积</view>
+    <view class="app-name">班级积分管理系统</view>
+    <view class="app-desc">考勤 · 积分 · 奖励 一站式管理</view>
+  </view>
+
+  <view class="card form">
+    <view class="field">
+      <view class="field-label">用户名</view>
+      <input
+        class="input"
+        placeholder="教师账号或学号"
+        value="{{username}}"
+        data-field="username"
+        bindinput="onInput"
+      />
+    </view>
+    <view class="field">
+      <view class="field-label">密码</view>
+      <input
+        class="input"
+        password
+        placeholder="请输入密码"
+        value="{{password}}"
+        data-field="password"
+        bindinput="onInput"
+      />
+    </view>
+    <button class="btn btn-primary" loading="{{submitting}}" bindtap="onSubmit">登 录</button>
+    <view class="tips">登录后本微信号将与该账号绑定，下次进入自动登录。</view>
+  </view>
+</view>

@@ -1,0 +1,65 @@
+<view class="page">
+  <view class="card">
+    <view class="card-title">
+      添加积分
+      <text class="sub">{{className || '全部班级'}}</text>
+    </view>
+
+    <view class="field">
+      <view class="field-label">学号</view>
+      <input class="input" placeholder="输入学号，或点选下方学生" value="{{studentId}}" data-field="studentId" bindinput="onInput" />
+      <scroll-view class="student-chips" scroll-x wx:if="{{students.length}}">
+        <view
+          wx:for="{{students}}"
+          wx:key="_id"
+          class="chip {{studentId === item.studentId ? 'active' : ''}}"
+          data-id="{{item.studentId}}"
+          bindtap="onPickStudent"
+        >
+          {{item.name}}
+        </view>
+      </scroll-view>
+    </view>
+
+    <view class="field">
+      <view class="field-label">积分类型</view>
+      <picker class="picker" mode="selector" range="{{scoreTypes}}" range-key="label" value="{{typeIndex}}" bindchange="onTypeChange">
+        <text>{{scoreTypes[typeIndex].label}}</text>
+        <text class="arrow">▾</text>
+      </picker>
+    </view>
+
+    <view class="field">
+      <view class="field-label">分值（可为负数表示扣分）</view>
+      <input class="input" type="digit" placeholder="例如 2" value="{{score}}" data-field="score" bindinput="onInput" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">加分理由</view>
+      <textarea class="textarea" placeholder="选填，便于日后查证" value="{{reason}}" data-field="reason" bindinput="onInput" />
+    </view>
+
+    <button class="btn btn-primary" loading="{{submitting}}" bindtap="onSubmit">确认加分</button>
+    <view class="muted tip">考勤分由学生扫码打卡自动产生，一般无需在此手动录入。</view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">
+      最近积分记录
+      <text class="sub">最新 {{records.length}} 条</text>
+    </view>
+    <view wx:for="{{records}}" wx:key="_id" class="list-item">
+      <view class="main">
+        <view class="title">{{item.studentText}}</view>
+        <view class="desc">{{item.typeLabel}}{{item.reason ? ' · ' + item.reason : ''}}</view>
+        <view class="desc">{{item.timeText}} · 操作员 {{item.operator}}</view>
+      </view>
+      <view class="aside">
+        <text class="badge {{item.score > 0 ? 'badge-success' : 'badge-danger'}}">
+          {{item.score > 0 ? '+' : ''}}{{item.score}}
+        </text>
+      </view>
+    </view>
+    <view wx:if="{{loaded && !records.length}}" class="empty">暂无积分记录</view>
+  </view>
+</view>

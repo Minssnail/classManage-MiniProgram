@@ -1,0 +1,32 @@
+.class-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--brand-light);
+  color: var(--brand);
+  border-radius: 14rpx;
+  padding: 18rpx 26rpx;
+  margin-bottom: 24rpx;
+  font-size: 26rpx;
+}
+
+.class-bar .current {
+  font-weight: 600;
+}
+
+.class-bar .link {
+  font-size: 24rpx;
+}
+
+.tip {
+  margin-top: 20rpx;
+  line-height: 1.6;
+}
+
+.pending {
+  color: var(--warning);
+}
+
+.assign-btn {
+  margin-top: 14rpx;
+}

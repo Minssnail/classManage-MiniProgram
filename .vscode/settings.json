@@ -1,0 +1,10 @@
+{
+  // WXML 的 style="..." 里含 {{ }} 插值，VS Code 的 CSS 校验器不认识，
+  // 会误报 css-semicolonexpected；WXSS 也不是标准 CSS（rpx 等），一并关掉校验。
+  // 真正的编译错误以微信开发者工具的控制台为准。
+  "css.validate": false,
+  "files.associations": {
+    "*.wxss": "css",
+    "*.wxml": "html"
+  }
+}

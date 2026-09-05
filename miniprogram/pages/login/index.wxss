@@ -1,0 +1,48 @@
+.login {
+  min-height: 100vh;
+  padding: 0 48rpx;
+  box-sizing: border-box;
+  background: linear-gradient(160deg, #3b5bdb 0%, #4c6ef5 42%, #f2f4f8 42%, #f2f4f8 100%);
+}
+
+.hero {
+  padding: 70rpx 0 80rpx;
+  color: #fff;
+}
+
+.logo {
+  width: 108rpx;
+  height: 108rpx;
+  border-radius: 30rpx;
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  font-size: 52rpx;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 32rpx;
+}
+
+.app-name {
+  font-size: 46rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+}
+
+.app-desc {
+  font-size: 26rpx;
+  opacity: 0.85;
+  margin-top: 12rpx;
+}
+
+.form {
+  padding: 40rpx 36rpx 36rpx;
+}
+
+.tips {
+  font-size: 23rpx;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 24rpx;
+}

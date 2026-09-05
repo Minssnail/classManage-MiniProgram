@@ -1,0 +1,57 @@
+{
+  "pages": [
+    "pages/dashboard/index",
+    "pages/attendance/index",
+    "pages/query/index",
+    "pages/profile/index",
+    "pages/login/index",
+    "pages/classes/index",
+    "pages/students/index",
+    "pages/score-manage/index",
+    "pages/rewards/index",
+    "pages/semesters/index",
+    "pages/statistics/index"
+  ],
+  "window": {
+    "backgroundColor": "#f2f4f8",
+    "backgroundTextStyle": "light",
+    "navigationBarBackgroundColor": "#3b5bdb",
+    "navigationBarTitleText": "班级积分管理",
+    "navigationBarTextStyle": "white"
+  },
+  "tabBar": {
+    "color": "#8a94a6",
+    "selectedColor": "#3b5bdb",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/dashboard/index",
+        "text": "概况",
+        "iconPath": "images/icons/home.png",
+        "selectedIconPath": "images/icons/home-active.png"
+      },
+      {
+        "pagePath": "pages/attendance/index",
+        "text": "考勤",
+        "iconPath": "images/icons/business.png",
+        "selectedIconPath": "images/icons/business-active.png"
+      },
+      {
+        "pagePath": "pages/query/index",
+        "text": "查询",
+        "iconPath": "images/icons/goods.png",
+        "selectedIconPath": "images/icons/goods-active.png"
+      },
+      {
+        "pagePath": "pages/profile/index",
+        "text": "我的",
+        "iconPath": "images/icons/usercenter.png",
+        "selectedIconPath": "images/icons/usercenter-active.png"
+      }
+    ]
+  },
+  "sitemapLocation": "sitemap.json",
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents"
+}

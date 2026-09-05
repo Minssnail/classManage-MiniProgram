@@ -1,0 +1,122 @@
+<view class="page">
+  <!-- 班级选择：教师可切换，学生固定为本班 -->
+  <view class="class-bar {{isTeacher ? '' : 'static'}}" bindtap="onToggleClassPanel">
+    <view class="class-name">{{className || '未分配班级'}}</view>
+    <view class="class-action" wx:if="{{isTeacher}}">
+      {{classPanelOpen ? '收起' : '切换班级'}}
+    </view>
+  </view>
+  <view class="card class-panel" wx:if="{{classPanelOpen}}">
+    <view
+      wx:for="{{classes}}"
+      wx:key="name"
+      class="class-option {{item.name === className ? 'active' : ''}}"
+      data-name="{{item.name}}"
+      bindtap="onPickClass"
+    >
+      <view>
+        <view class="title">{{item.name}}</view>
+        <view class="desc">
+          {{item.studentCount}} 人<text wx:if="{{item.pendingStudentId}}"> · {{item.pendingStudentId}} 人待分配学号</text>
+        </view>
+      </view>
+      <text wx:if="{{item.name === className}}" class="badge badge-brand">当前</text>
+    </view>
+    <view wx:if="{{!classes.length}}" class="empty">暂无班级，请在「我的 → 班级管理」中创建</view>
+  </view>
+
+  <!-- 学期选择 -->
+  <view class="semester-bar" bindtap="onToggleSemesterPanel">
+    <view class="semester-name">{{semesterLabel}}</view>
+    <view class="semester-arrow">{{semesterPanelOpen ? '收起' : '切换学期'}}</view>
+  </view>
+  <view class="card semester-panel" wx:if="{{semesterPanelOpen}}">
+    <view
+      wx:for="{{semesters}}"
+      wx:key="_id"
+      class="semester-option"
+      data-id="{{item._id}}"
+      bindtap="onPickSemester"
+    >
+      <view>
+        <view class="title">{{item.name}}</view>
+        <view class="desc">{{item.startDate}} 至 {{item.endDate}}</view>
+      </view>
+      <view>
+        <text wx:if="{{item.isCurrent}}" class="badge badge-brand">当前</text>
+        <text wx:if="{{item.isArchived}}" class="badge badge-muted">已存档</text>
+      </view>
+    </view>
+    <view wx:if="{{!semesters.length}}" class="empty">暂无学期数据</view>
+  </view>
+
+  <view class="readonly-bar" wx:if="{{readonly}}">
+    <text>正在只读浏览历史学期数据</text>
+    <text class="link" bindtap="onExitBrowse">返回当前学期</text>
+  </view>
+
+  <!-- 数据概览 -->
+  <view class="stat-grid" wx:if="{{overview}}">
+    <view class="stat-card brand">
+      <view class="stat-value">{{isTeacher ? overview.totalStudents : overview.myTotalScore}}</view>
+      <view class="stat-label">{{isTeacher ? '学生总数' : '我的积分'}}</view>
+    </view>
+    <view class="stat-card success">
+      <view class="stat-value">{{overview.totalScores}}</view>
+      <view class="stat-label">{{isTeacher ? '累计积分' : '班级累计积分'}}</view>
+    </view>
+    <view class="stat-card warning">
+      <view class="stat-value">{{overview.todayScores}}</view>
+      <view class="stat-label">今日积分</view>
+    </view>
+    <view class="stat-card info">
+      <view class="stat-value">{{overview.activeStudents}}</view>
+      <view class="stat-label">今日打卡人数</view>
+    </view>
+  </view>
+
+  <!-- 积分类型分布 -->
+  <view class="card">
+    <view class="card-title">积分类型分布</view>
+    <view wx:for="{{typeBars}}" wx:key="label" class="bar-row">
+      <view class="bar-head">
+        <text class="bar-label">{{item.label}}</text>
+        <text class="bar-value">{{item.value}}</text>
+      </view>
+      <view class="bar-track">
+        <view class="bar-fill" style="width: {{item.percent}}%"></view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 积分排行榜 -->
+  <view class="card">
+    <view class="card-title">
+      积分排行榜
+      <text class="sub">共 {{ranking.length}} 人</text>
+    </view>
+    <view wx:for="{{ranking}}" wx:key="studentId" class="list-item">
+      <view class="rank rank-{{index < 3 ? index + 1 : 'n'}}">{{index + 1}}</view>
+      <view class="main">
+        <view class="title">{{item.name}}</view>
+        <view class="desc">{{item.studentId}} · {{item.className}}</view>
+      </view>
+      <view class="aside">
+        <text class="badge badge-success">{{item.totalScore}} 分</text>
+      </view>
+    </view>
+    <view wx:if="{{loaded && !ranking.length}}" class="empty">暂无学生数据</view>
+  </view>
+
+  <!-- 加分说明 -->
+  <view class="card">
+    <view class="card-title">加分说明</view>
+    <view wx:for="{{bonusRules}}" wx:key="title" class="rule">
+      <view class="rule-head" data-index="{{index}}" bindtap="onToggleRule">
+        <text>{{item.title}}</text>
+        <text class="rule-toggle">{{openRule === index ? '−' : '+'}}</text>
+      </view>
+      <view class="rule-body" wx:if="{{openRule === index}}">{{item.detail}}</view>
+    </view>
+  </view>
+</view>

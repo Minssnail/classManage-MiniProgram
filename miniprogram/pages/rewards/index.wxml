@@ -1,0 +1,84 @@
+<view class="page">
+  <view class="card">
+    <view class="card-title">
+      发放奖励
+      <text class="sub">{{className || '全部班级'}}</text>
+    </view>
+
+    <view class="field">
+      <view class="field-label">学号</view>
+      <input class="input" placeholder="输入学号，或点选下方学生" value="{{studentId}}" data-field="studentId" bindinput="onInput" />
+      <scroll-view class="student-chips" scroll-x wx:if="{{students.length}}">
+        <view
+          wx:for="{{students}}"
+          wx:key="_id"
+          class="chip {{studentId === item.studentId ? 'active' : ''}}"
+          data-id="{{item.studentId}}"
+          bindtap="onPickStudent"
+        >
+          {{item.name}}
+        </view>
+      </scroll-view>
+    </view>
+
+    <view class="field">
+      <view class="field-label">奖励类型</view>
+      <picker class="picker" mode="selector" range="{{rewardTypes}}" value="{{typeIndex}}" bindchange="onTypeChange">
+        <text>{{rewardTypes[typeIndex]}}</text>
+        <text class="arrow">▾</text>
+      </picker>
+    </view>
+
+    <view class="field">
+      <view class="field-label">获奖理由</view>
+      <textarea class="textarea" placeholder="选填" value="{{reason}}" data-field="reason" bindinput="onInput" />
+    </view>
+
+    <button class="btn btn-primary" loading="{{submitting}}" bindtap="onSubmit">发放奖励</button>
+    <view class="muted tip">奖券图片按奖项等级自动匹配，发放后可在下方标记兑换状态。</view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">
+      奖励记录
+      <text class="sub">共 {{rewards.length}} 条</text>
+    </view>
+    <view wx:for="{{rewards}}" wx:key="_id" class="reward-item">
+      <image
+        class="cert"
+        wx:if="{{item.certificateImage}}"
+        src="{{item.certificateImage}}"
+        mode="aspectFill"
+        data-url="{{item.certificateImage}}"
+        bindtap="onPreviewCertificate"
+      />
+      <view class="main">
+        <view class="title">
+          {{item.studentText}}
+          <text class="badge {{item.isRedeemed ? 'badge-success' : 'badge-warning'}}">
+            {{item.isRedeemed ? '已兑换' : '未兑换'}}
+          </text>
+        </view>
+        <view class="desc">{{item.rewardType}}{{item.reason ? ' · ' + item.reason : ''}}</view>
+        <view class="desc">{{item.timeText}} · 操作员 {{item.operator}}</view>
+        <view class="desc redeemed" wx:if="{{item.isRedeemed && item.redeemedText}}">
+          兑换时间：{{item.redeemedText}}
+        </view>
+        <view
+          class="btn btn-ghost btn-sm redeem-btn"
+          data-id="{{item._id}}"
+          data-redeemed="{{item.isRedeemed}}"
+          bindtap="onToggleRedeem"
+        >
+          {{item.isRedeemed ? '取消兑换' : '确认兑换'}}
+        </view>
+      </view>
+    </view>
+    <view wx:if="{{loaded && !rewards.length}}" class="empty">暂无奖励记录</view>
+  </view>
+
+  <view class="preview-mask" wx:if="{{previewUrl}}" bindtap="onClosePreview">
+    <image class="preview-image" src="{{previewUrl}}" mode="widthFix" />
+    <view class="preview-tip">点击任意处关闭</view>
+  </view>
+</view>

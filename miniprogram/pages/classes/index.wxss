@@ -1,0 +1,43 @@
+.tip {
+  margin-top: 20rpx;
+  line-height: 1.6;
+}
+
+.class-item {
+  padding: 24rpx 0;
+  border-bottom: 2rpx solid var(--border);
+}
+
+.class-item:last-child {
+  border-bottom: none;
+}
+
+.class-item .title {
+  font-size: 29rpx;
+  font-weight: 500;
+}
+
+.class-item .title .badge {
+  margin-left: 12rpx;
+}
+
+.class-item .desc {
+  font-size: 23rpx;
+  color: var(--text-muted);
+  margin-top: 6rpx;
+}
+
+.class-item .pending {
+  color: var(--warning);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 18rpx;
+}
+
+.actions .btn {
+  margin-right: 16rpx;
+  margin-bottom: 12rpx;
+}

@@ -1,0 +1,280 @@
+/* 全局样式与设计变量 */
+page {
+  --brand: #3b5bdb;
+  --brand-light: #edf0ff;
+  --brand-dark: #2f49af;
+  --success: #2f9e44;
+  --success-light: #ebfbee;
+  --warning: #f08c00;
+  --warning-light: #fff4e6;
+  --danger: #e03131;
+  --danger-light: #fff5f5;
+  --info: #1098ad;
+  --text: #1f2733;
+  --text-muted: #7c8698;
+  --border: #e8ecf2;
+  --bg: #f2f4f8;
+  --card: #ffffff;
+
+  background: var(--bg);
+  color: var(--text);
+  font-size: 28rpx;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+  line-height: 1.6;
+}
+
+/* 底部留白直接给足，不用 calc + env()：WXSS 编译器不支持这个组合 */
+.page {
+  padding: 24rpx 24rpx 60rpx;
+  box-sizing: border-box;
+  min-height: 100vh;
+}
+
+/* ---------- 卡片 ---------- */
+.card {
+  background: var(--card);
+  border-radius: 20rpx;
+  padding: 28rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 4rpx 20rpx rgba(31, 39, 51, 0.05);
+}
+
+.card-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  margin-bottom: 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-title .sub {
+  font-size: 24rpx;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.section-title {
+  font-size: 26rpx;
+  color: var(--text-muted);
+  margin: 8rpx 4rpx 16rpx;
+}
+
+/* ---------- 文本 ---------- */
+.muted {
+  color: var(--text-muted);
+  font-size: 24rpx;
+}
+
+.strong {
+  font-weight: 600;
+}
+
+.empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 26rpx;
+  padding: 60rpx 0;
+}
+
+/* ---------- 表单 ---------- */
+.field {
+  margin-bottom: 24rpx;
+}
+
+.field-label {
+  font-size: 26rpx;
+  color: var(--text-muted);
+  margin-bottom: 12rpx;
+}
+
+.input,
+.picker,
+.textarea {
+  background: #f7f8fb;
+  border: 2rpx solid var(--border);
+  border-radius: 14rpx;
+  font-size: 28rpx;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* input 用固定高度 + 等高行高做垂直居中。
+   小程序的 input 会继承 page 上的 line-height，行高大于内容盒时文字会被裁掉，
+   所以这里不能靠上下 padding 撑高度。 */
+.input {
+  height: 88rpx;
+  padding: 0 24rpx;
+  line-height: 84rpx;
+}
+
+.textarea {
+  height: 160rpx;
+  padding: 16rpx 24rpx;
+  line-height: 1.5;
+}
+
+.picker {
+  padding: 20rpx 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.picker .arrow {
+  color: var(--text-muted);
+  font-size: 24rpx;
+}
+
+.input[disabled] {
+  color: var(--text-muted);
+}
+
+/* ---------- 按钮 ---------- */
+.btn {
+  border-radius: 14rpx;
+  font-size: 29rpx;
+  font-weight: 500;
+  padding: 22rpx 0;
+  text-align: center;
+  line-height: 1.4;
+  border: none;
+}
+
+.btn::after {
+  border: none;
+}
+
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+}
+
+.btn-primary[disabled] {
+  background: #b9c2e6;
+  color: #fff;
+}
+
+.btn-ghost {
+  background: var(--brand-light);
+  color: var(--brand);
+}
+
+.btn-danger {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.btn-plain {
+  background: #f1f3f7;
+  color: var(--text);
+}
+
+.btn-sm {
+  font-size: 25rpx;
+  padding: 12rpx 26rpx;
+  display: inline-block;
+  width: auto;
+}
+
+.btn-row {
+  display: flex;
+}
+
+.btn-row .btn {
+  flex: 1;
+  margin-right: 20rpx;
+}
+
+.btn-row .btn:last-child {
+  margin-right: 0;
+}
+
+/* ---------- 徽标 ---------- */
+.badge {
+  display: inline-block;
+  font-size: 22rpx;
+  padding: 4rpx 16rpx;
+  border-radius: 999rpx;
+  line-height: 1.6;
+}
+
+.badge-brand {
+  background: var(--brand-light);
+  color: var(--brand);
+}
+
+.badge-success {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.badge-warning {
+  background: var(--warning-light);
+  color: var(--warning);
+}
+
+.badge-danger {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.badge-muted {
+  background: #f1f3f7;
+  color: var(--text-muted);
+}
+
+/* ---------- 列表 ---------- */
+.list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 0;
+  border-bottom: 2rpx solid var(--border);
+}
+
+.list-item:last-child {
+  border-bottom: none;
+}
+
+.list-item .main {
+  flex: 1;
+  min-width: 0;
+  padding-right: 20rpx;
+}
+
+.list-item .title {
+  font-size: 28rpx;
+  font-weight: 500;
+}
+
+.list-item .desc {
+  font-size: 23rpx;
+  color: var(--text-muted);
+  margin-top: 6rpx;
+}
+
+.list-item .aside {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ---------- 只读浏览提示条 ---------- */
+.readonly-bar {
+  background: var(--warning-light);
+  color: #8a5300;
+  border-radius: 16rpx;
+  padding: 20rpx 24rpx;
+  font-size: 25rpx;
+  margin-bottom: 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.readonly-bar .link {
+  color: var(--brand);
+  font-weight: 500;
+  flex-shrink: 0;
+  margin-left: 16rpx;
+}

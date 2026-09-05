@@ -1,0 +1,62 @@
+<view class="page">
+  <view class="card">
+    <view class="card-title">新建学期</view>
+    <view class="field">
+      <view class="field-label">学期名称</view>
+      <input class="input" placeholder="例如：2026年秋季学期" value="{{name}}" data-field="name" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <view class="field-label">开始日期</view>
+      <picker class="picker" mode="date" value="{{startDate}}" data-field="startDate" bindchange="onDateChange">
+        <text class="{{startDate ? '' : 'placeholder'}}">{{startDate || '请选择开始日期'}}</text>
+        <text class="arrow">▾</text>
+      </picker>
+    </view>
+    <view class="field">
+      <view class="field-label">结束日期</view>
+      <picker class="picker" mode="date" value="{{endDate}}" data-field="endDate" bindchange="onDateChange">
+        <text class="{{endDate ? '' : 'placeholder'}}">{{endDate || '请选择结束日期'}}</text>
+        <text class="arrow">▾</text>
+      </picker>
+    </view>
+    <button class="btn btn-primary" loading="{{submitting}}" bindtap="onCreate">创建学期</button>
+    <view class="muted tip">当前学期按今天所处的日期区间自动判定，无需手动切换。</view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">
+      学期列表
+      <text class="sub">共 {{semesters.length}} 个</text>
+    </view>
+    <view wx:for="{{semesters}}" wx:key="_id" class="semester-item">
+      <view class="head">
+        <view class="title">
+          {{item.name}}
+          <text wx:if="{{item.isCurrent}}" class="badge badge-brand">当前</text>
+          <text wx:if="{{item.isArchived}}" class="badge badge-muted">已存档</text>
+        </view>
+        <view class="desc">{{item.startDate}} 至 {{item.endDate}}</view>
+      </view>
+      <view class="actions">
+        <view
+          wx:if="{{!item.isCurrent && !item.isArchived}}"
+          class="btn btn-ghost btn-sm"
+          data-id="{{item._id}}"
+          bindtap="onSetCurrent"
+        >
+          设为当前
+        </view>
+        <view
+          wx:if="{{!item.isArchived}}"
+          class="btn btn-plain btn-sm"
+          data-id="{{item._id}}"
+          bindtap="onArchive"
+        >
+          存档
+        </view>
+        <view class="btn btn-danger btn-sm" data-id="{{item._id}}" bindtap="onRemove">删除</view>
+      </view>
+    </view>
+    <view wx:if="{{loaded && !semesters.length}}" class="empty">暂无学期数据</view>
+  </view>
+</view>

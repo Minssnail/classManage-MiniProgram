@@ -1,0 +1,41 @@
+.placeholder {
+  color: #b6bdc9;
+}
+
+.tip {
+  margin-top: 20rpx;
+  line-height: 1.6;
+}
+
+.semester-item {
+  padding: 24rpx 0;
+  border-bottom: 2rpx solid var(--border);
+}
+
+.semester-item:last-child {
+  border-bottom: none;
+}
+
+.semester-item .title {
+  font-size: 28rpx;
+  font-weight: 500;
+}
+
+.semester-item .title .badge {
+  margin-left: 12rpx;
+}
+
+.semester-item .desc {
+  font-size: 23rpx;
+  color: var(--text-muted);
+  margin-top: 6rpx;
+}
+
+.actions {
+  display: flex;
+  margin-top: 18rpx;
+}
+
+.actions .btn {
+  margin-right: 16rpx;
+}
