@@ -5,8 +5,8 @@
  * 都能在云函数 classmanage 与各页面中一一对应，不要写不存在的能力。
  */
 
-// 联系邮箱在协议末尾展示，上线前请替换为可正常接收邮件的地址
-const CONTACT_EMAIL = '【请填写联系邮箱】';
+// 协议末尾展示的联系方式，用于接收用户的隐私相关咨询与投诉
+const CONTACT_EMAIL = 'chenminshi2017@163.com';
 
 const TERMS = {
   key: 'terms',
