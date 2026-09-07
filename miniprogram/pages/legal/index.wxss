@@ -1,0 +1,49 @@
+.doc-title {
+  font-size: 36rpx;
+  font-weight: 600;
+}
+
+.doc-meta {
+  font-size: 23rpx;
+  color: var(--text-muted);
+  margin-top: 8rpx;
+}
+
+.doc-intro {
+  font-size: 26rpx;
+  color: var(--text);
+  line-height: 1.8;
+  margin-top: 20rpx;
+  padding-top: 20rpx;
+  border-top: 2rpx solid var(--border);
+}
+
+.section-heading {
+  font-size: 29rpx;
+  font-weight: 600;
+  margin-bottom: 16rpx;
+}
+
+.section-item {
+  font-size: 26rpx;
+  color: var(--text-muted);
+  line-height: 1.85;
+  margin-bottom: 14rpx;
+  padding-left: 24rpx;
+  position: relative;
+}
+
+.section-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 18rpx;
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+.section-item:last-child {
+  margin-bottom: 0;
+}

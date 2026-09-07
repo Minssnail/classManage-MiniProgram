@@ -1,0 +1,14 @@
+<view class="page" wx:if="{{doc}}">
+  <view class="card">
+    <view class="doc-title">{{doc.title}}</view>
+    <view class="doc-meta">更新日期：{{doc.updatedAt}}</view>
+    <view class="doc-intro">{{doc.intro}}</view>
+  </view>
+
+  <view class="card" wx:for="{{doc.sections}}" wx:key="title">
+    <view class="section-heading">{{item.title}}</view>
+    <view class="section-item" wx:for="{{item.items}}" wx:for-item="line" wx:key="*this">
+      {{line}}
+    </view>
+  </view>
+</view>

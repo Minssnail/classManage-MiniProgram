@@ -13,6 +13,9 @@ const TTL_OPTIONS = [
 
 const STATUS_POLL_MS = 3000;
 
+// 首次调用摄像头前须明确告知用途并取得同意，同意后不再重复打扰
+const CAMERA_CONSENT_KEY = 'cameraConsent';
+
 function stopRefresh() {
   wx.stopPullDownRefresh();
 }
@@ -252,8 +255,29 @@ Page({
     }
   },
 
-  onScan() {
+  async onScan() {
     if (this.data.scanning) return;
+
+    let consented = false;
+    try {
+      consented = wx.getStorageSync(CAMERA_CONSENT_KEY) === true;
+    } catch (e) {
+      consented = false;
+    }
+    if (!consented) {
+      const ok = await util.confirm(
+        '打卡需要调用摄像头扫描教师出示的考勤二维码。\n\n' +
+          '我们仅用它识别二维码，不会拍摄、保存或上传任何图像，扫码结束即关闭摄像头。',
+        '摄像头使用说明'
+      );
+      if (!ok) return;
+      try {
+        wx.setStorageSync(CAMERA_CONSENT_KEY, true);
+      } catch (e) {
+        // 写入失败只是下次会再问一次，不影响功能
+      }
+    }
+
     this.setData({ scanning: true });
     wx.scanCode({
       // 只允许现场摄像头扫码，杜绝用相册里的二维码截图打卡
@@ -274,6 +298,10 @@ Page({
     } finally {
       this.setData({ scanning: false });
     }
+  },
+
+  onOpenDoc(e) {
+    wx.navigateTo({ url: '/pages/legal/index?type=' + e.currentTarget.dataset.type });
   },
 
   onGotoClasses() {

@@ -153,6 +153,10 @@ Page({
     }
   },
 
+  onOpenPrivacy(e) {
+    wx.navigateTo({ url: e.currentTarget.dataset.url });
+  },
+
   onGotoClasses() {
     wx.navigateTo({ url: '/pages/classes/index' });
   },

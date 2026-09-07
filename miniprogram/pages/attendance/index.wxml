@@ -148,6 +148,8 @@
       </button>
       <view class="hint">
         打卡须现场扫描教师端出示的二维码，二维码短时间内即失效，相册截图无法使用。
+        点击后将调用摄像头识别二维码，我们不会拍摄、保存或上传任何图像，扫码结束即关闭摄像头。
+        详见<text class="link" data-type="privacy" bindtap="onOpenDoc">《隐私政策》</text>。
       </view>
     </view>
 

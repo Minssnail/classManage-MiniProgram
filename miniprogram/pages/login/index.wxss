@@ -26,9 +26,41 @@
   padding: 40rpx 36rpx 36rpx;
 }
 
-.tips {
+/* 授权同意勾选 */
+.agree-row {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 28rpx;
+}
+
+.checkbox {
+  width: 34rpx;
+  height: 34rpx;
+  border: 2rpx solid #c7cedb;
+  border-radius: 8rpx;
+  margin-right: 14rpx;
+  margin-top: 4rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  color: #fff;
+  background: #fff;
+}
+
+.checkbox.checked {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.agree-text {
+  flex: 1;
   font-size: 23rpx;
   color: var(--text-muted);
-  text-align: center;
-  margin-top: 24rpx;
+  line-height: 1.7;
+}
+
+.agree-text .link {
+  color: var(--brand);
 }

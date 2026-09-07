@@ -9,7 +9,7 @@
       <view class="field-label">用户名</view>
       <input
         class="input"
-        placeholder="教师账号或学号"
+        placeholder="学号 / 手机号 / 教师账号"
         value="{{username}}"
         data-field="username"
         bindinput="onInput"
@@ -26,7 +26,27 @@
         bindinput="onInput"
       />
     </view>
-    <button class="btn btn-primary" loading="{{submitting}}" bindtap="onSubmit">登 录</button>
-    <view class="tips">登录后本微信号将与该账号绑定，下次进入自动登录。</view>
+
+    <!-- 未取得同意前不收集任何信息，因此勾选是登录的前置条件 -->
+    <view class="agree-row">
+      <view class="checkbox {{agreed ? 'checked' : ''}}" bindtap="onToggleAgree">
+        <text wx:if="{{agreed}}">✓</text>
+      </view>
+      <view class="agree-text">
+        <text bindtap="onToggleAgree">我已阅读并同意</text>
+        <text class="link" data-type="terms" catchtap="onOpenDoc">《用户服务协议》</text>
+        <text bindtap="onToggleAgree">和</text>
+        <text class="link" data-type="privacy" catchtap="onOpenDoc">《隐私政策》</text>
+      </view>
+    </view>
+
+    <button
+      class="btn btn-primary"
+      loading="{{submitting}}"
+      disabled="{{!agreed}}"
+      bindtap="onSubmit"
+    >
+      登 录
+    </button>
   </view>
 </view>

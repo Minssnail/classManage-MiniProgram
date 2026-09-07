@@ -35,3 +35,14 @@
 .row-actions .btn {
   margin-right: 16rpx;
 }
+
+.privacy-note {
+  font-size: 22rpx;
+  color: var(--text-muted);
+  line-height: 1.7;
+  margin-top: 12rpx;
+}
+
+.privacy-note .link {
+  color: var(--brand);
+}

@@ -55,6 +55,18 @@
     </view>
   </view>
 
+  <view class="card menu">
+    <view class="section-title">协议与隐私</view>
+    <view class="menu-item" data-url="/pages/legal/index?type=terms" bindtap="onNavigate">
+      <text>用户服务协议</text>
+      <text class="chevron">›</text>
+    </view>
+    <view class="menu-item" data-url="/pages/legal/index?type=privacy" bindtap="onNavigate">
+      <text>隐私政策</text>
+      <text class="chevron">›</text>
+    </view>
+  </view>
+
   <button class="btn btn-danger logout" bindtap="onLogout">退出登录</button>
 
   <!-- 修改密码浮层 -->

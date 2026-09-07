@@ -10,7 +10,8 @@
     "pages/score-manage/index",
     "pages/rewards/index",
     "pages/semesters/index",
-    "pages/statistics/index"
+    "pages/statistics/index",
+    "pages/legal/index"
   ],
   "window": {
     "backgroundColor": "#f2f4f8",

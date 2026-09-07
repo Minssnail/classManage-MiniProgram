@@ -17,6 +17,11 @@
     <view class="field">
       <view class="field-label">手机号</view>
       <input class="input" type="number" placeholder="11 位手机号" value="{{phone}}" data-field="phone" bindinput="onInput" />
+      <view class="privacy-note">
+        手机号仅用于该学生的登录账号与身份识别，仅任课教师可见，不向同学展示，不作其他用途。
+        录入前请确认已征得学生本人（未成年人还需监护人）同意。详见
+        <text class="link" data-url="/pages/legal/index?type=privacy" bindtap="onOpenPrivacy">《隐私政策》</text>。
+      </view>
     </view>
     <button class="btn btn-primary" loading="{{submitting}}" disabled="{{!className}}" bindtap="onAdd">
       添加学生
