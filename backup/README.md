@@ -18,7 +18,7 @@ backup/
 | --- | --- | --- |
 | `students.json` | 必需 | 学生名单与所在班级 |
 | `scoreRecords.json` | 必需 | 积分与考勤记录 |
-| `semesters.json` | 可选 | 提供后按学期分组并显示学期名 |
+| `semesters.json` | 可选 | 提供后显示学期名；缺失时以记录的日期区间代替 |
 
 导出格式是 JSON Lines（每行一个文档），脚本也兼容普通 JSON 数组。
 
@@ -30,7 +30,8 @@ node scripts/snapshot-ranking.js            # 只生成，自己检查后再提�
 git push
 ```
 
-产物是 `backup/ranking/YYYY-MM-DD.md`，同一天重复执行会覆盖当天的文件；内容没变化时 `--commit` 不会产生空提交。
+产物是 `backup/ranking/YYYY-MM-DD.md`，按「班级 → 学期」分组，每个班的每个学期各一份榜单，
+当前学期与历史学期都会归档。同一天重复执行会覆盖当天的文件；内容没变化时 `--commit` 不会产生空提交。
 
 ## 脱敏规则
 

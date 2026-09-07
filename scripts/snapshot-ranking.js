@@ -77,6 +77,13 @@ function maskKey(key) {
   return '…' + s.slice(-4);
 }
 
+// 一组记录覆盖的北京日期区间，用于标注学期并在缺少学期名时兜底
+function dayRange(records) {
+  const days = records.map((r) => r.day).filter(Boolean).sort();
+  if (!days.length) return null;
+  return { from: days[0], to: days[days.length - 1] };
+}
+
 function today() {
   const d = new Date(Date.now() + 8 * 3600 * 1000); // 按北京时间
   return d.toISOString().slice(0, 10);
@@ -116,6 +123,9 @@ function main() {
   const students = readDocs('students.json', true);
   const records = readDocs('scoreRecords.json', true);
   const semesters = readDocs('semesters.json', false);
+  if (!semesters.length) {
+    console.warn('未找到 semesters.json，学期名将以日期区间代替。建议一并导出该集合。');
+  }
 
   const semesterName = {};
   for (const s of semesters) semesterName[s._id] = s.name;
@@ -158,15 +168,20 @@ function main() {
       const subset = classRecords.filter((r) => (r.semesterId || null) === sid);
       const ranking = buildRanking(classStudents, subset);
       const total = ranking.reduce((n, r) => n + r.total, 0);
-      const label = semesterName[sid] || (sid ? '未知学期' : '未归属学期');
-      lines.push(
-        `### ${label}`,
-        '',
-        `记录 ${subset.length} 条，合计 ${total} 分。`,
-        '',
-        renderTable(ranking),
-        ''
-      );
+      const range = dayRange(subset);
+
+      // 没导出 semesters.json 时用记录的日期区间兜底，否则多个学期会都叫「未知学期」而无法区分
+      let label = semesterName[sid];
+      if (!label) {
+        label = sid ? '未知学期' : '未归属学期';
+        if (range) label += `（${range.from} 至 ${range.to}）`;
+      }
+
+      const meta = range
+        ? `记录 ${subset.length} 条，合计 ${total} 分，覆盖 ${range.from} 至 ${range.to}。`
+        : `记录 ${subset.length} 条，合计 ${total} 分。`;
+
+      lines.push(`### ${label}`, '', meta, '', renderTable(ranking), '');
       sections++;
     }
   }
