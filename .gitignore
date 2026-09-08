@@ -13,11 +13,13 @@ $RECYCLE.BIN/
 # Node.js
 node_modules/
 
-# 学生名册原始表格（含姓名与手机号），不入库
+# 学生名册与成绩原始表格（含姓名、手机号、学号），不入库
 *.xlsx
+*.xls
 
 # 开发者工具的个人私有配置
 project.private.config.json
 
 # 云开发导出的原始数据，含完整姓名、手机号、学号，不入库
 backup/raw/
+

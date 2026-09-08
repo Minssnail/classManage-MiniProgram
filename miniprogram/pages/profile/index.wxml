@@ -34,11 +34,30 @@
       <text>学期管理</text>
       <text class="chevron">›</text>
     </view>
+    <view class="menu-item" bindtap="onImportAcademic">
+      <view>
+        <text>导入课程与成绩</text>
+        <view class="menu-desc">导入专业规则、课程清单与历次考试成绩</view>
+      </view>
+      <text class="chevron">›</text>
+    </view>
     <view class="menu-item" bindtap="onImportLegacy">
       <view>
         <text>导入历史数据</text>
         <view class="menu-desc">从 Web 版迁移积分与奖励记录，可重复执行</view>
       </view>
+      <text class="chevron">›</text>
+    </view>
+  </view>
+
+  <view class="card menu">
+    <view class="section-title">学业</view>
+    <view class="menu-item" data-url="/pages/courses/index" bindtap="onNavigate">
+      <text>课程信息</text>
+      <text class="chevron">›</text>
+    </view>
+    <view class="menu-item" data-url="/pages/exam/index" bindtap="onNavigate">
+      <text>成绩查询</text>
       <text class="chevron">›</text>
     </view>
   </view>

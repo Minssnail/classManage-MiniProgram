@@ -23,6 +23,9 @@ const COLLECTIONS = [
   'scoreRecords',
   'rewards',
   'attendanceCodes',
+  'majors',
+  'courses',
+  'examScores',
 ];
 
 const SCORE_TYPES = ['attendance', 'homework', 'exam', 'activity', 'other'];
@@ -767,6 +770,15 @@ actions['class.list'] = async ({ user, payload }) => {
   }
 
   const semesters = await semesterMap();
+  let majors = [];
+  try {
+    majors = await fetchAll(db.collection('majors'));
+  } catch (e) {
+    // majors 集合可能尚未创建
+  }
+  const majorByRule = {};
+  for (const m of majors) majorByRule[m.ruleCode] = m;
+
   const known = new Set(classes.map((c) => c.name));
   const list = classes.map((c) => ({
     _id: c._id,
@@ -775,6 +787,11 @@ actions['class.list'] = async ({ user, payload }) => {
     startDate: c.startDate || null,
     startSemesterName:
       c.startSemesterId && semesters[c.startSemesterId] ? semesters[c.startSemesterId].name : null,
+    ruleCode: c.ruleCode || null,
+    majorName:
+      c.ruleCode && majorByRule[c.ruleCode]
+        ? majorByRule[c.ruleCode].name + ' ' + majorByRule[c.ruleCode].enrollTerm
+        : null,
     studentCount: counts[c.name] || 0,
     pendingStudentId: pending[c.name] || 0,
   }));
@@ -787,6 +804,8 @@ actions['class.list'] = async ({ user, payload }) => {
       isArchived: false,
       startDate: null,
       startSemesterName: null,
+      ruleCode: null,
+      majorName: null,
       studentCount: counts[name],
       pendingStudentId: pending[name] || 0,
     });
@@ -1378,6 +1397,396 @@ actions['stats.trend'] = async ({ user, payload }) => {
     role: user.role,
     semesterId,
     className,
+  };
+};
+
+// ---------- 课程与成绩 ----------
+
+// 统设必修课：课程类型为「统设」且课程性质以「必修」开头（含「必修(分部)」）
+function isRequiredCourse(course) {
+  return !!course && course.courseType === '统设' && /^必修/.test(String(course.courseNature || ''));
+}
+
+function isPassed(record) {
+  return record.status === '及格';
+}
+
+const scoreOf = (r) => (Number.isFinite(Number(r.totalScore)) ? Number(r.totalScore) : 0);
+
+/**
+ * 每门课只保留综合成绩最高的一次。
+ * 补考通过后应以通过的那次为准，重复参加也取最好成绩。
+ */
+function bestAttempts(records) {
+  const best = {};
+  for (const r of records) {
+    const k = r.studentId + '|' + r.courseCode;
+    if (!best[k] || scoreOf(r) > scoreOf(best[k])) best[k] = r;
+  }
+  return Object.values(best);
+}
+
+/**
+ * 解析本次请求适用的专业规则号：取班级上绑定的规则；
+ * 未绑定时回退到库中第一套规则，避免课程查询直接空白。
+ */
+async function resolveRuleCode(user, payload) {
+  const explicit = String((payload && payload.ruleCode) || '').trim();
+  if (explicit && user.role === 'teacher') return explicit;
+
+  const className = await resolveClassName(user, payload);
+  const cls = await getClassDoc(className);
+  if (cls && cls.ruleCode) return cls.ruleCode;
+
+  const majors = await fetchAll(db.collection('majors'));
+  return majors.length ? majors[0].ruleCode : null;
+}
+
+/**
+ * 课程索引：先用本专业规则，找不到再回退到其他规则版本并标记来源。
+ * 成绩里出现本规则没有的课程时（跨规则版本选课），仍能显示学分与性质。
+ */
+async function courseIndex(ruleCode) {
+  const all = await fetchAll(db.collection('courses'));
+  const own = {};
+  const fallback = {};
+  for (const c of all) {
+    if (c.ruleCode === ruleCode) own[c.code] = c;
+    else if (!fallback[c.code]) fallback[c.code] = c;
+  }
+  return {
+    all,
+    get(code) {
+      if (own[code]) return { ...own[code], fromOtherRule: false };
+      if (fallback[code]) return { ...fallback[code], fromOtherRule: true };
+      return null;
+    },
+    ownList() {
+      return Object.values(own);
+    },
+  };
+}
+
+// 教师批量导入专业规则、课程与考试成绩；按唯一键去重，可重复执行
+actions['academic.import'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  for (const name of ['majors', 'courses', 'examScores']) await ensureCollection(name);
+
+  const majors = Array.isArray(payload.majors) ? payload.majors : [];
+  const courses = Array.isArray(payload.courses) ? payload.courses : [];
+  const scores = Array.isArray(payload.scores) ? payload.scores : [];
+  const result = { majors: 0, courses: 0, scores: 0, skipped: 0 };
+
+  const [existMajors, existCourses, existScores] = await Promise.all([
+    fetchAll(db.collection('majors')),
+    fetchAll(db.collection('courses')),
+    fetchAll(db.collection('examScores')),
+  ]);
+  const majorKeys = new Set(existMajors.map((m) => m.ruleCode));
+  const courseKeys = new Set(existCourses.map((c) => c.ruleCode + '|' + c.code));
+  const scoreKeys = new Set(
+    existScores.map((s) => [s.term, s.studentId, s.courseCode, s.paperNo].join('|'))
+  );
+
+  const writes = [];
+  for (const m of majors) {
+    if (majorKeys.has(m.ruleCode)) {
+      result.skipped++;
+      continue;
+    }
+    majorKeys.add(m.ruleCode);
+    result.majors++;
+    writes.push(db.collection('majors').add({ data: { ...m, createdAt: new Date() } }));
+  }
+  for (const c of courses) {
+    const k = c.ruleCode + '|' + c.code;
+    if (courseKeys.has(k)) {
+      result.skipped++;
+      continue;
+    }
+    courseKeys.add(k);
+    result.courses++;
+    writes.push(db.collection('courses').add({ data: c }));
+  }
+  for (const s of scores) {
+    const k = [s.term, s.studentId, s.courseCode, s.paperNo].join('|');
+    if (scoreKeys.has(k)) {
+      result.skipped++;
+      continue;
+    }
+    scoreKeys.add(k);
+    result.scores++;
+    writes.push(db.collection('examScores').add({ data: s }));
+  }
+
+  await Promise.all(writes);
+  return result;
+};
+
+// 课程信息查询：按专业规则返回课程清单，可按性质、类型、考试单位、模块筛选
+actions['course.list'] = async ({ user, payload }) => {
+  requireLogin(user);
+  const ruleCode = await resolveRuleCode(user, payload);
+  if (!ruleCode) return { courses: [], major: null, ruleCode: null, summary: null };
+
+  const majorRes = await db.collection('majors').where({ ruleCode }).limit(1).get();
+  const index = await courseIndex(ruleCode);
+  let courses = index.ownList();
+
+  const nature = String(payload.courseNature || '').trim();
+  const type = String(payload.courseType || '').trim();
+  const unit = String(payload.examUnit || '').trim();
+  const module2 = String(payload.level2Module || '').trim();
+  const keyword = String(payload.keyword || '').trim();
+
+  if (payload.requiredOnly) courses = courses.filter(isRequiredCourse);
+  if (nature) courses = courses.filter((c) => String(c.courseNature || '').startsWith(nature));
+  if (type) courses = courses.filter((c) => c.courseType === type);
+  if (unit) courses = courses.filter((c) => c.examUnit === unit);
+  if (module2) courses = courses.filter((c) => c.level2Module === module2);
+  if (keyword) {
+    courses = courses.filter((c) => c.name.indexOf(keyword) >= 0 || c.code.indexOf(keyword) >= 0);
+  }
+
+  courses.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+  const own = index.ownList();
+  const required = own.filter(isRequiredCourse);
+  return {
+    ruleCode,
+    major: majorRes.data[0] || null,
+    courses: courses.map((c) => ({ ...c, isRequired: isRequiredCourse(c) })),
+    modules: [...new Set(own.map((c) => c.level2Module).filter(Boolean))],
+    summary: {
+      total: own.length,
+      totalCredits: own.reduce((n, c) => n + (c.credits || 0), 0),
+      requiredCount: required.length,
+      requiredCredits: required.reduce((n, c) => n + (c.credits || 0), 0),
+    },
+  };
+};
+
+// 按角色收窄成绩查询范围：学生只能看自己的
+async function examScopeStudentIds(user, payload) {
+  if (user.role === 'student') return [user.studentId];
+  const explicit = String(payload.studentId || '').trim();
+  if (explicit) return [explicit];
+  const className = await resolveClassName(user, payload);
+  if (!className) return null; // 教师未选班级表示不限
+  const ids = await classStudentIds(className);
+  return ids ? [...ids] : [];
+}
+
+async function loadExamRecords(user, payload) {
+  const ids = await examScopeStudentIds(user, payload);
+  const all = await fetchAll(db.collection('examScores'));
+  return ids ? all.filter((r) => ids.indexOf(r.studentId) >= 0) : all;
+}
+
+// 成绩查询：保留原表全部字段，并补上课程规则里的学分与性质
+actions['exam.list'] = async ({ user, payload }) => {
+  requireLogin(user);
+  const ruleCode = await resolveRuleCode(user, payload);
+  const index = await courseIndex(ruleCode);
+  const students = await studentMap();
+
+  let records = await loadExamRecords(user, payload);
+  const courseCode = String(payload.courseCode || '').trim();
+  const term = String(payload.term || '').trim();
+  const keyword = String(payload.keyword || '').trim();
+
+  if (courseCode) records = records.filter((r) => r.courseCode === courseCode);
+  if (term) records = records.filter((r) => r.term === term);
+  if (keyword) {
+    records = records.filter(
+      (r) => r.courseName.indexOf(keyword) >= 0 || r.courseCode.indexOf(keyword) >= 0
+    );
+  }
+  if (payload.requiredOnly) records = records.filter((r) => isRequiredCourse(index.get(r.courseCode)));
+  if (payload.failedOnly) records = records.filter((r) => !isPassed(r));
+  if (payload.bestOnly) records = bestAttempts(records);
+
+  records.sort((a, b) => (a.term < b.term ? 1 : a.term > b.term ? -1 : a.courseCode < b.courseCode ? -1 : 1));
+
+  const decorated = records.slice(0, Number(payload.limit) || 300).map((r) => {
+    const c = index.get(r.courseCode);
+    return {
+      ...r,
+      studentName: students[r.studentId] ? students[r.studentId].name : null,
+      credits: c ? c.credits : null,
+      courseType: c ? c.courseType : null,
+      courseNature: c ? c.courseNature : null,
+      examUnit: c ? c.examUnit : null,
+      level2Module: c ? c.level2Module : null,
+      isRequired: isRequiredCourse(c),
+      // 该课不在本专业规则内，属性取自其他规则版本
+      fromOtherRule: c ? c.fromOtherRule : false,
+      inPlan: !!c,
+    };
+  });
+
+  return {
+    records: decorated,
+    total: records.length,
+    terms: [...new Set((await loadExamRecords(user, payload)).map((r) => r.term))].sort().reverse(),
+    ruleCode,
+  };
+};
+
+/**
+ * 成绩汇总：按「统设必修」与「全部课程」两种口径各给两个算术平均分。
+ * 含未过：每门课取最高综合成绩后平均，未通过的课按实际分数计入（无效课程为 0）；
+ * 仅已过：只统计已及格的课程。两者差距越大，说明挂科拖累越重。
+ */
+function summarize(records, index, scope) {
+  let rows = bestAttempts(records);
+  if (scope === 'required') rows = rows.filter((r) => isRequiredCourse(index.get(r.courseCode)));
+
+  const passed = rows.filter(isPassed);
+  const pending = rows.filter((r) => !isPassed(r));
+  const mean = (arr) =>
+    arr.length ? Math.round((arr.reduce((n, v) => n + v, 0) / arr.length) * 10) / 10 : null;
+
+  const creditsOf = (r) => {
+    const c = index.get(r.courseCode);
+    return c && Number.isFinite(c.credits) ? c.credits : 0;
+  };
+
+  return {
+    scope,
+    courseCount: rows.length,
+    passedCount: passed.length,
+    pendingCount: pending.length,
+    avgIncludingFailed: mean(rows.map(scoreOf)),
+    avgPassedOnly: mean(passed.map(scoreOf)),
+    earnedCredits: passed.reduce((n, r) => n + creditsOf(r), 0),
+    pendingCredits: pending.reduce((n, r) => n + creditsOf(r), 0),
+  };
+}
+
+actions['exam.summary'] = async ({ user, payload }) => {
+  requireLogin(user);
+  const ruleCode = await resolveRuleCode(user, payload);
+  const index = await courseIndex(ruleCode);
+  const records = await loadExamRecords(user, payload);
+  const students = await studentMap();
+
+  const ids = [...new Set(records.map((r) => r.studentId))];
+  const perStudent = ids
+    .map((sid) => {
+      const mine = records.filter((r) => r.studentId === sid);
+      return {
+        studentId: sid,
+        name: students[sid] ? students[sid].name : null,
+        className: students[sid] ? students[sid].className : null,
+        required: summarize(mine, index, 'required'),
+        all: summarize(mine, index, 'all'),
+      };
+    })
+    .sort((a, b) => (b.all.avgIncludingFailed || 0) - (a.all.avgIncludingFailed || 0));
+
+  return {
+    ruleCode,
+    studentCount: ids.length,
+    students: perStudent,
+    overall: {
+      required: summarize(records, index, 'required'),
+      all: summarize(records, index, 'all'),
+    },
+  };
+};
+
+/**
+ * 待补考科目：某门课的所有考试记录里没有一次及格。
+ * 补考通过后自动从名单中消失，无需人工维护。
+ */
+actions['exam.pending'] = async ({ user, payload }) => {
+  requireLogin(user);
+  const ruleCode = await resolveRuleCode(user, payload);
+  const index = await courseIndex(ruleCode);
+  const records = await loadExamRecords(user, payload);
+  const students = await studentMap();
+
+  const byKey = {};
+  for (const r of records) {
+    const k = r.studentId + '|' + r.courseCode;
+    (byKey[k] = byKey[k] || []).push(r);
+  }
+
+  let pending = Object.values(byKey)
+    .filter((group) => !group.some(isPassed))
+    .map((group) => {
+      const best = group.reduce((a, b) => (scoreOf(b) > scoreOf(a) ? b : a));
+      const c = index.get(best.courseCode);
+      return {
+        studentId: best.studentId,
+        studentName: students[best.studentId] ? students[best.studentId].name : null,
+        courseCode: best.courseCode,
+        courseName: best.courseName,
+        credits: c ? c.credits : null,
+        courseType: c ? c.courseType : null,
+        courseNature: c ? c.courseNature : null,
+        examUnit: c ? c.examUnit : null,
+        isRequired: isRequiredCourse(c),
+        attempts: group.length,
+        lastTerm: group.map((r) => r.term).sort().pop(),
+        bestScore: scoreOf(best),
+        finalScore: best.finalScore,
+        status: best.status,
+        // 要求双及格的课程终考不足 60 分即判无效，综合记 0
+        dualRequired: !!best.dualRequired,
+      };
+    });
+
+  if (payload.requiredOnly) pending = pending.filter((p) => p.isRequired);
+  pending.sort(
+    (a, b) =>
+      (a.studentName || '').localeCompare(b.studentName || '') ||
+      b.attempts - a.attempts ||
+      a.courseCode.localeCompare(b.courseCode)
+  );
+
+  return {
+    ruleCode,
+    pending,
+    total: pending.length,
+    requiredTotal: pending.filter((p) => p.isRequired).length,
+    pendingCredits: pending.reduce((n, p) => n + (p.credits || 0), 0),
+    studentCount: new Set(pending.map((p) => p.studentId)).size,
+  };
+};
+
+// 给班级绑定专业规则，课程与成绩查询据此确定适用的规则版本
+actions['class.setRule'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const name = String(payload.name || '').trim();
+  const ruleCode = String(payload.ruleCode || '').trim();
+  if (!name) fail('班级名称不能为空');
+  const cls = await getClassDoc(name);
+  if (!cls) fail('班级不存在');
+
+  if (ruleCode) {
+    const major = await db.collection('majors').where({ ruleCode }).limit(1).get();
+    if (!major.data.length) fail('专业规则不存在：' + ruleCode);
+  }
+  await db.collection('classes').doc(cls._id).update({ data: { ruleCode: ruleCode || null } });
+  return { message: ruleCode ? '已绑定专业规则' : '已解除专业规则绑定' };
+};
+
+actions['major.list'] = async ({ user }) => {
+  requireLogin(user);
+  let majors = [];
+  try {
+    majors = await fetchAll(db.collection('majors'));
+  } catch (e) {
+    await ensureCollection('majors');
+  }
+  const courses = majors.length ? await fetchAll(db.collection('courses')) : [];
+  return {
+    majors: majors.map((m) => ({
+      ...m,
+      courseCount: courses.filter((c) => c.ruleCode === m.ruleCode).length,
+    })),
   };
 };
 

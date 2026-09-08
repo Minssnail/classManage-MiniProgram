@@ -10,6 +10,7 @@ Page({
   data: {
     classes: [],
     semesters: [],
+    majors: [],
     currentClass: '',
     newName: '',
     creating: false,
@@ -37,13 +38,15 @@ Page({
 
   async loadClasses() {
     try {
-      const [list, semesterRes] = await Promise.all([
+      const [list, semesterRes, majorRes] = await Promise.all([
         app.loadClasses(true),
         api.call('semester.list', {}, { loading: false, silent: true }).catch(() => ({ semesters: [] })),
+        api.call('major.list', {}, { loading: false, silent: true }).catch(() => ({ majors: [] })),
       ]);
       this.setData({
         classes: list,
         semesters: semesterRes.semesters || [],
+        majors: majorRes.majors || [],
         currentClass: app.globalData.currentClass || '',
         loaded: true,
       });
@@ -66,6 +69,33 @@ Page({
           const out = await api.call('class.setStartSemester', {
             name,
             semesterId: picked ? picked._id : null,
+          });
+          util.toast(out.message, 'success');
+          await this.loadClasses();
+        } catch (err) {
+          // 错误提示已在 api 层弹出
+        }
+      },
+    });
+  },
+
+  // 绑定专业规则后，课程信息与成绩查询才知道该用哪套规则版本
+  onSetRule(e) {
+    const name = e.currentTarget.dataset.name;
+    const majors = this.data.majors.slice(0, 5);
+    if (!majors.length) {
+      util.toast('请先在「我的 → 导入课程与成绩」中导入专业规则');
+      return;
+    }
+    const labels = majors.map((m) => m.name + ' ' + m.enrollTerm + '（' + m.courseCount + '门）');
+    wx.showActionSheet({
+      itemList: labels.concat(['解除绑定']),
+      success: async (res) => {
+        const picked = res.tapIndex < majors.length ? majors[res.tapIndex] : null;
+        try {
+          const out = await api.call('class.setRule', {
+            name,
+            ruleCode: picked ? picked.ruleCode : '',
           });
           util.toast(out.message, 'success');
           await this.loadClasses();

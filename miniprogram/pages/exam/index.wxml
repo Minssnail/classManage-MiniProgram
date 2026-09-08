@@ -1,0 +1,162 @@
+<view class="page">
+  <view class="tabs">
+    <view
+      wx:for="{{tabs}}"
+      wx:key="key"
+      class="tab {{tab === item.key ? 'active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="onTab"
+    >
+      {{item.label}}
+    </view>
+  </view>
+
+  <!-- 口径与筛选 -->
+  <view class="card filter">
+    <view class="scope-row" bindtap="onToggleScope">
+      <view class="scope-label">统计口径</view>
+      <view class="scope-value">
+        {{requiredOnly ? '统设必修课' : '全部课程'}}
+        <text class="scope-switch">切换</text>
+      </view>
+    </view>
+    <view class="field" wx:if="{{isTeacher && students.length}}">
+      <picker class="picker" mode="selector" range="{{students}}" range-key="name" value="{{studentIndex}}" bindchange="onStudent">
+        <text>{{students[studentIndex].name}}</text>
+        <text class="arrow">▾</text>
+      </picker>
+    </view>
+    <view class="field" wx:if="{{tab === 'list' && terms.length > 1}}">
+      <picker class="picker" mode="selector" range="{{terms}}" value="{{termIndex}}" bindchange="onTerm">
+        <text>{{terms[termIndex]}}</text>
+        <text class="arrow">▾</text>
+      </picker>
+    </view>
+  </view>
+
+  <!-- ============ 成绩汇总 ============ -->
+  <block wx:if="{{tab === 'summary'}}">
+    <!-- 学生端：自己的大卡片 -->
+    <view class="card avg-card" wx:if="{{myCard}}">
+      <view class="avg-title">
+        {{requiredOnly ? '统设必修课' : '全部课程'}}平均分
+        <text class="explain" bindtap="onExplainAverage">口径说明</text>
+      </view>
+      <view class="avg-row">
+        <view class="avg-box">
+          <view class="avg-num">{{myCard.avgIncludingFailed === null ? '—' : myCard.avgIncludingFailed}}</view>
+          <view class="avg-label">含未过</view>
+        </view>
+        <view class="avg-box">
+          <view class="avg-num ok">{{myCard.avgPassedOnly === null ? '—' : myCard.avgPassedOnly}}</view>
+          <view class="avg-label">仅已过</view>
+        </view>
+      </view>
+      <view class="avg-meta">
+        共 {{myCard.courseCount}} 门 · 已过 {{myCard.passedCount}} 门 · 待补考 {{myCard.pendingCount}} 门
+        <text wx:if="{{myCard.earnedCredits}}"> · 已获 {{myCard.earnedCredits}} 学分</text>
+      </view>
+    </view>
+
+    <!-- 教师端：全班汇总 + 每人一行 -->
+    <view class="card" wx:if="{{summary && isTeacher}}">
+      <view class="card-title">
+        全班汇总
+        <text class="explain" bindtap="onExplainAverage">口径说明</text>
+      </view>
+      <view class="overall" wx:if="{{summary.overallScope}}">
+        <view class="ov"><text class="ov-num">{{summary.overallScope.avgIncludingFailed === null ? '—' : summary.overallScope.avgIncludingFailed}}</text><text class="ov-label">含未过</text></view>
+        <view class="ov"><text class="ov-num ok">{{summary.overallScope.avgPassedOnly === null ? '—' : summary.overallScope.avgPassedOnly}}</text><text class="ov-label">仅已过</text></view>
+        <view class="ov"><text class="ov-num">{{summary.overallScope.passedCount}}</text><text class="ov-label">已过门次</text></view>
+        <view class="ov"><text class="ov-num warn">{{summary.overallScope.pendingCount}}</text><text class="ov-label">待补考</text></view>
+      </view>
+    </view>
+
+    <view class="card" wx:if="{{summary && isTeacher}}">
+      <view class="card-title">
+        学生平均分
+        <text class="sub">{{summary.studentCount}} 人</text>
+      </view>
+      <view wx:for="{{summary.students}}" wx:key="studentId" class="list-item">
+        <view class="main">
+          <view class="title">{{item.name || item.studentId}}</view>
+          <view class="desc">
+            {{item.scope.courseCount}} 门 · 已过 {{item.scope.passedCount}}
+            <text wx:if="{{item.scope.pendingCount}}" class="warn"> · 待补考 {{item.scope.pendingCount}}</text>
+          </view>
+        </view>
+        <view class="aside two-score">
+          <view class="score-main">{{item.scope.avgIncludingFailed === null ? '—' : item.scope.avgIncludingFailed}}</view>
+          <view class="score-sub">仅已过 {{item.scope.avgPassedOnly === null ? '—' : item.scope.avgPassedOnly}}</view>
+        </view>
+      </view>
+      <view wx:if="{{loaded && !summary.students.length}}" class="empty">暂无成绩数据</view>
+    </view>
+  </block>
+
+  <!-- ============ 成绩明细 ============ -->
+  <block wx:elif="{{tab === 'list'}}">
+    <view class="card">
+      <view class="card-title">
+        成绩明细
+        <text class="sub">共 {{records.length}} 条</text>
+      </view>
+      <view wx:for="{{records}}" wx:key="_id" class="exam">
+        <view class="exam-head">
+          <view class="exam-name">
+            {{item.courseName}}
+            <text wx:if="{{!item.inPlan || item.fromOtherRule}}" class="badge badge-muted plan-tag">计划外</text>
+          </view>
+          <text class="badge {{item.statusClass}}">{{item.status}}</text>
+        </view>
+        <view class="exam-meta">
+          {{item.term}} · {{item.courseCode}}
+          <text wx:if="{{item.studentName && isTeacher}}"> · {{item.studentName}}</text>
+          <text wx:if="{{item.credits}}"> · {{item.credits}}学分</text>
+          <text wx:if="{{item.courseNature}}"> · {{item.courseType}}{{item.courseNature}}</text>
+        </view>
+        <view class="scores">
+          <view class="sc"><text class="sc-label">形考({{item.formRatio}}%)</text><text class="sc-num">{{item.formText}}</text></view>
+          <view class="sc"><text class="sc-label">终考</text><text class="sc-num">{{item.finalText}}</text></view>
+          <view class="sc"><text class="sc-label">综合</text><text class="sc-num strong">{{item.totalScore}}</text></view>
+          <view class="sc" wx:if="{{item.dualRequired}}"><text class="sc-label">双及格</text><text class="sc-num">要求</text></view>
+        </view>
+      </view>
+      <view wx:if="{{loaded && !records.length}}" class="empty">暂无成绩记录</view>
+    </view>
+  </block>
+
+  <!-- ============ 待补考 ============ -->
+  <block wx:else>
+    <view class="card" wx:if="{{pending}}">
+      <view class="card-title">
+        待补考科目
+        <text class="sub">{{pending.total}} 门次 · {{pending.studentCount}} 人</text>
+      </view>
+      <view class="pending-note">
+        某门课的历次考试都没有及格才计入；补考通过后会自动消失。
+      </view>
+      <view wx:for="{{pending.pending}}" wx:key="courseCode" class="list-item">
+        <view class="main">
+          <view class="title">
+            <text wx:if="{{isTeacher}}">{{item.studentName}} · </text>{{item.courseName}}
+            <text wx:if="{{item.isRequired}}" class="badge badge-brand">统设必修</text>
+          </view>
+          <view class="desc">
+            {{item.courseCode}}
+            <text wx:if="{{item.credits}}"> · {{item.credits}}学分</text>
+            <text wx:if="{{item.examUnit}}"> · {{item.examUnit}}考试</text>
+          </view>
+          <view class="desc">
+            已考 {{item.attempts}} 次 · 最近 {{item.lastTerm}} · 最好成绩 {{item.bestScore}}
+            <text wx:if="{{item.dualRequired}}" class="warn"> · 要求双及格</text>
+          </view>
+        </view>
+        <view class="aside">
+          <text class="badge {{item.status === '无效' ? 'badge-danger' : 'badge-warning'}}">{{item.status}}</text>
+        </view>
+      </view>
+      <view wx:if="{{loaded && !pending.total}}" class="empty">没有待补考科目</view>
+    </view>
+  </block>
+</view>

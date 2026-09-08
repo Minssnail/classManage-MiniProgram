@@ -51,6 +51,72 @@ Page({
     wx.navigateTo({ url: e.currentTarget.dataset.url });
   },
 
+  // ---------- 导入课程与成绩 ----------
+
+  // 课程与成绩数据量大，分批提交避免单次调用超时；服务端按唯一键去重
+  async onImportAcademic() {
+    const curriculum = require('../../data/curriculum');
+    const { majors, courses } = curriculum;
+    const { scores } = require('../../data/exam-scores');
+    if (!courses.length && !scores.length) {
+      wx.showModal({
+        title: '没有可导入的数据',
+        content: 'data/curriculum.js 或 data/exam-scores.js 还是占位文件。请先在本地用脚本从专业规则与成绩表生成，详见 data/README.md。',
+        showCancel: false,
+      });
+      return;
+    }
+
+    const ok = await util.confirm(
+      `将导入 ${majors.length} 套专业规则、${courses.length} 门课程、${scores.length} 条考试成绩。\n已导入过的会自动跳过，可以重复执行。`,
+      '导入课程与成绩'
+    );
+    if (!ok) return;
+
+    const CHUNK = 100;
+    const batches = [{ majors, courses: courses.slice(0, CHUNK), scores: [] }];
+    for (let i = CHUNK; i < courses.length; i += CHUNK) {
+      batches.push({ majors: [], courses: courses.slice(i, i + CHUNK), scores: [] });
+    }
+    for (let i = 0; i < scores.length; i += CHUNK) {
+      batches.push({ majors: [], courses: [], scores: scores.slice(i, i + CHUNK) });
+    }
+
+    const sum = { majors: 0, courses: 0, scores: 0, skipped: 0 };
+    wx.showLoading({ title: '导入中 0%', mask: true });
+    try {
+      for (let i = 0; i < batches.length; i++) {
+        const res = await api.call('academic.import', batches[i], { loading: false });
+        sum.majors += res.majors;
+        sum.courses += res.courses;
+        sum.scores += res.scores;
+        sum.skipped += res.skipped;
+        wx.showLoading({
+          title: '导入中 ' + Math.round(((i + 1) / batches.length) * 100) + '%',
+          mask: true,
+        });
+      }
+    } catch (e) {
+      wx.hideLoading();
+      wx.showModal({
+        title: '导入中断',
+        content: `已导入课程 ${sum.courses} 门、成绩 ${sum.scores} 条。再次点击可从断点继续。`,
+        showCancel: false,
+      });
+      return;
+    }
+    wx.hideLoading();
+
+    wx.showModal({
+      title: '导入完成',
+      content:
+        `专业规则 ${sum.majors} 套、课程 ${sum.courses} 门、成绩 ${sum.scores} 条，` +
+        `跳过（已存在）${sum.skipped} 条。\n\n` +
+        '接下来请到「班级管理」为班级绑定专业规则，课程与成绩查询才能按规则显示。',
+      showCancel: false,
+    });
+  },
+
   // ---------- 导入 Web 版历史数据 ----------
 
   // 分批提交，避免单次云函数调用的数据量与耗时过大；已导入的记录服务端会跳过

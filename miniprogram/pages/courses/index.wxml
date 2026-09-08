@@ -1,0 +1,85 @@
+<view class="page">
+  <!-- 专业规则概要 -->
+  <view class="card major-card" wx:if="{{major}}">
+    <view class="major-name">{{major.name}} · {{major.level}}</view>
+    <view class="major-meta">规则号 {{major.ruleCode}} · {{major.studentType}}</view>
+    <view class="major-stats" wx:if="{{summary}}">
+      <view class="stat">
+        <view class="stat-num">{{summary.total}}</view>
+        <view class="stat-label">开设课程</view>
+      </view>
+      <view class="stat">
+        <view class="stat-num">{{summary.totalCredits}}</view>
+        <view class="stat-label">课程学分</view>
+      </view>
+      <view class="stat">
+        <view class="stat-num">{{summary.requiredCount}}</view>
+        <view class="stat-label">统设必修</view>
+      </view>
+      <view class="stat">
+        <view class="stat-num">{{major.minCredits}}</view>
+        <view class="stat-label">毕业学分</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="card" wx:elif="{{loaded}}">
+    <view class="empty">
+      未找到专业规则
+      <view class="muted tip">该班级还没有绑定专业规则，或规则数据尚未导入。</view>
+      <view class="btn btn-ghost btn-sm goto" bindtap="onGotoClasses">去处理</view>
+    </view>
+  </view>
+
+  <!-- 筛选 -->
+  <view class="card" wx:if="{{major}}">
+    <view class="tabs">
+      <view
+        wx:for="{{scopes}}"
+        wx:key="key"
+        class="tab {{scope === item.key ? 'active' : ''}}"
+        data-key="{{item.key}}"
+        bindtap="onScope"
+      >
+        {{item.label}}
+      </view>
+    </view>
+    <view class="field">
+      <picker class="picker" mode="selector" range="{{modules}}" value="{{moduleIndex}}" bindchange="onModule">
+        <text>{{modules[moduleIndex]}}</text>
+        <text class="arrow">▾</text>
+      </picker>
+    </view>
+    <view class="field">
+      <input class="input" placeholder="按课程名称或代码搜索" value="{{keyword}}" bindinput="onKeyword" bindconfirm="onSearch" />
+    </view>
+    <view class="btn-row">
+      <button class="btn btn-primary" bindtap="onSearch">查询</button>
+      <button class="btn btn-plain" bindtap="onReset">重置</button>
+    </view>
+  </view>
+
+  <!-- 课程列表 -->
+  <view class="card" wx:if="{{major}}">
+    <view class="card-title">
+      课程清单
+      <text class="sub">共 {{courses.length}} 门</text>
+    </view>
+
+    <view wx:for="{{courses}}" wx:key="code" class="course">
+      <view class="course-head">
+        <view class="course-name">{{item.name}}</view>
+        <view class="course-credits">{{item.credits}} 学分</view>
+      </view>
+      <view class="course-code">{{item.code}} · {{item.level2Module}}</view>
+      <view class="tags">
+        <text class="badge {{item.isRequired ? 'badge-brand' : 'badge-muted'}}">{{item.courseType}}</text>
+        <text class="badge {{item.courseNature === '选修' ? 'badge-muted' : 'badge-success'}}">{{item.courseNature}}</text>
+        <text class="badge {{item.examUnit === '总部' ? 'badge-warning' : 'badge-muted'}}">{{item.examUnit}}考试</text>
+        <text class="badge badge-muted">{{item.termText}}</text>
+      </view>
+    </view>
+
+    <view wx:if="{{loaded && !courses.length}}" class="empty">没有符合条件的课程</view>
+  </view>
+</view>

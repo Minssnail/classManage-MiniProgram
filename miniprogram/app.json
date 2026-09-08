@@ -11,6 +11,8 @@
     "pages/rewards/index",
     "pages/semesters/index",
     "pages/statistics/index",
+    "pages/courses/index",
+    "pages/exam/index",
     "pages/legal/index"
   ],
   "window": {

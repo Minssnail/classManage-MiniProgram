@@ -1,0 +1,230 @@
+.tabs {
+  display: flex;
+  background: var(--card);
+  border-radius: 16rpx;
+  padding: 8rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 4rpx 20rpx rgba(31, 39, 51, 0.05);
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 18rpx 0;
+  font-size: 26rpx;
+  color: var(--text-muted);
+  border-radius: 12rpx;
+}
+
+.tab.active {
+  background: var(--brand);
+  color: #fff;
+  font-weight: 500;
+}
+
+/* 口径切换 */
+.scope-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 20rpx;
+  margin-bottom: 4rpx;
+}
+
+.scope-label {
+  font-size: 26rpx;
+  color: var(--text-muted);
+}
+
+.scope-value {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.scope-switch {
+  font-size: 22rpx;
+  font-weight: 400;
+  color: var(--text-muted);
+  background: #f1f3f7;
+  padding: 4rpx 16rpx;
+  border-radius: 999rpx;
+  margin-left: 12rpx;
+}
+
+.explain {
+  font-size: 22rpx;
+  font-weight: 400;
+  color: var(--brand);
+}
+
+/* 学生端平均分大卡 */
+.avg-card {
+  background: linear-gradient(135deg, #4c6ef5, #3b5bdb);
+  color: #fff;
+}
+
+.avg-title {
+  font-size: 27rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.avg-title .explain {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.avg-row {
+  display: flex;
+  margin: 26rpx 0 20rpx;
+}
+
+.avg-box {
+  flex: 1;
+  text-align: center;
+}
+
+.avg-num {
+  font-size: 64rpx;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.avg-num.ok {
+  color: #d3f9d8;
+}
+
+.avg-label {
+  font-size: 22rpx;
+  opacity: 0.85;
+  margin-top: 6rpx;
+}
+
+.avg-meta {
+  font-size: 22rpx;
+  opacity: 0.9;
+  padding-top: 20rpx;
+  border-top: 2rpx solid rgba(255, 255, 255, 0.25);
+}
+
+/* 教师端全班汇总 */
+.overall {
+  display: flex;
+}
+
+.ov {
+  flex: 1;
+  text-align: center;
+}
+
+.ov-num {
+  display: block;
+  font-size: 40rpx;
+  font-weight: 600;
+}
+
+.ov-num.ok {
+  color: var(--success);
+}
+
+.ov-num.warn {
+  color: var(--warning);
+}
+
+.ov-label {
+  display: block;
+  font-size: 21rpx;
+  color: var(--text-muted);
+  margin-top: 4rpx;
+}
+
+.two-score {
+  min-width: 150rpx;
+}
+
+.score-main {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.score-sub {
+  font-size: 21rpx;
+  color: var(--text-muted);
+  margin-top: 2rpx;
+}
+
+.warn {
+  color: var(--warning);
+}
+
+/* 成绩明细 */
+.exam {
+  padding: 24rpx 0;
+  border-bottom: 2rpx solid var(--border);
+}
+
+.exam:last-child {
+  border-bottom: none;
+}
+
+.exam-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.exam-name {
+  font-size: 28rpx;
+  font-weight: 500;
+  flex: 1;
+  padding-right: 16rpx;
+}
+
+.plan-tag {
+  margin-left: 10rpx;
+}
+
+.exam-meta {
+  font-size: 22rpx;
+  color: var(--text-muted);
+  margin-top: 6rpx;
+}
+
+.scores {
+  display: flex;
+  margin-top: 14rpx;
+  background: #f7f8fb;
+  border-radius: 12rpx;
+  padding: 14rpx 0;
+}
+
+.sc {
+  flex: 1;
+  text-align: center;
+}
+
+.sc-label {
+  display: block;
+  font-size: 20rpx;
+  color: var(--text-muted);
+}
+
+.sc-num {
+  display: block;
+  font-size: 28rpx;
+  margin-top: 4rpx;
+}
+
+.sc-num.strong {
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.pending-note {
+  font-size: 22rpx;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-bottom: 12rpx;
+}
