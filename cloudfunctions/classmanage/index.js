@@ -294,14 +294,15 @@ const actions = {};
 
 // ---------- 系统初始化 ----------
 
+/**
+ * 初始化用的示例学生：仅为让新环境有可用数据，不是真实名单。
+ * 真实学生请用「班级管理 → 导入名册」或「学生管理 → 添加学生」录入，
+ * 姓名、学号属于个人信息，不写进代码。
+ */
 const SEED_STUDENTS = [
-  { name: '示例学生一', studentId: '2000000000001', className: '23秋软件工程班' },
-  { name: '示例学生二', studentId: '2000000000002', className: '23秋软件工程班' },
-  { name: '示例学生三', studentId: '2000000000003', className: '23秋软件工程班' },
-  { name: '示例学生四', studentId: '2000000000004', className: '23秋软件工程班' },
-  { name: '示例学生五', studentId: '2000000000005', className: '23秋软件工程班' },
-  { name: '示例学生六', studentId: '2000000000006', className: '23秋软件工程班' },
-  { name: '示例学生七', studentId: '2000000000007', className: '23秋软件工程班' },
+  { name: '示例学生一', studentId: '2000000000001', className: '示例班级' },
+  { name: '示例学生二', studentId: '2000000000002', className: '示例班级' },
+  { name: '示例学生三', studentId: '2000000000003', className: '示例班级' },
 ];
 
 const SEED_SEMESTERS = [
@@ -336,8 +337,10 @@ actions['system.init'] = async ({ user }) => {
   const studentIds = new Set(existingStudents.map((s) => s.studentId));
   const usernames = new Set(existingUsers.map((u) => u.username));
 
+  // 教师初始密码随机生成并随结果返回，不在代码里写死
+  const teacherPassword = crypto.randomBytes(6).toString('base64url');
   const accounts = [
-    { username: 'teacher', password: 'CHANGE_ME', role: 'teacher', studentId: null },
+    { username: 'teacher', password: teacherPassword, role: 'teacher', studentId: null },
     ...SEED_STUDENTS.map((s) => ({
       username: s.studentId,
       password: 'student',
@@ -361,8 +364,10 @@ actions['system.init'] = async ({ user }) => {
     created.students++;
     writes.push(db.collection('students').add({ data: { ...seed, createdAt: new Date() } }));
   }
+  let teacherCreated = false;
   for (const acc of accounts) {
     if (usernames.has(acc.username)) continue;
+    if (acc.role === 'teacher') teacherCreated = true;
     created.users++;
     const { salt, hash } = hashPassword(acc.password);
     writes.push(
@@ -387,7 +392,15 @@ actions['system.init'] = async ({ user }) => {
   const seedClasses = [...new Set(SEED_STUDENTS.map((s) => s.className))];
   await Promise.all(seedClasses.map((name) => ensureClass(name, user)));
 
-  return { message: '初始化完成', created };
+  return {
+    message: '初始化完成',
+    created,
+    // 只有本次真正新建了教师账号才返回密码；账号已存在时随机密码没有意义
+    teacherAccount: teacherCreated ? { username: 'teacher', password: teacherPassword } : null,
+    hint: teacherCreated
+      ? '请立即记下教师密码并在登录后修改，此密码只显示这一次。'
+      : '教师账号已存在，密码未变更。',
+  };
 };
 
 // 迁移自 Web 版的数据统一打上来源标记，配合 legacyId 实现可重复执行的导入
