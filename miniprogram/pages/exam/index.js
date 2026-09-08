@@ -33,6 +33,7 @@ Page({
     terms: [],
     termIndex: 0,
     pending: null,
+    exporting: false,
     loaded: false,
   },
 
@@ -159,6 +160,61 @@ Page({
       this.setData({ pending: res, loaded: true });
     } catch (e) {
       this.setData({ loaded: true });
+    }
+  },
+
+  /**
+   * 导出补考选课表：云函数按学校模板生成 xlsx 并传到云存储，
+   * 这里下载后用微信的文档预览打开，可再转发或用其他应用保存。
+   */
+  async onExportRetake() {
+    if (this.data.exporting) return;
+    const scopeText = this.data.requiredOnly ? '统设必修课' : '全部课程';
+    const ok = await util.confirm(
+      `将按「${scopeText}」口径导出待补考科目，格式对齐学校的「批量导入选课记录」模板。`,
+      '导出补考选课表'
+    );
+    if (!ok) return;
+
+    this.setData({ exporting: true });
+    wx.showLoading({ title: '生成中', mask: true });
+    try {
+      const res = await api.call(
+        'exam.exportRetake',
+        { ...this.baseParams(), requiredOnly: this.data.requiredOnly },
+        { loading: false }
+      );
+      wx.showLoading({ title: '下载中', mask: true });
+      const file = await wx.cloud.downloadFile({ fileID: res.fileID });
+      wx.hideLoading();
+
+      let tip = `已生成 ${res.rowCount} 条选课记录，涉及 ${res.studentCount} 名学生。`;
+      if (res.missingStudentId && res.missingStudentId.length) {
+        tip +=
+          '\n\n以下学生尚未分配学号，模板要求填身份证，系统里没有该字段，' +
+          '学号列已留空，请在表格中手动补齐：' +
+          res.missingStudentId.join('、');
+      }
+      tip += '\n\n接下来会打开表格，可通过右上角菜单转发或用其他应用保存。';
+
+      wx.showModal({
+        title: '导出成功',
+        content: tip,
+        showCancel: false,
+        success: () => {
+          wx.openDocument({
+            filePath: file.tempFilePath,
+            fileType: 'xlsx',
+            showMenu: true,
+            fail: () => util.toast('打开表格失败，请稍后重试'),
+          });
+        },
+      });
+    } catch (e) {
+      wx.hideLoading();
+      // 错误提示已在 api 层弹出
+    } finally {
+      this.setData({ exporting: false });
     }
   },
 

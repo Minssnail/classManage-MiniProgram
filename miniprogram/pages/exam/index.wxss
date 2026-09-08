@@ -228,3 +228,7 @@
   line-height: 1.6;
   margin-bottom: 12rpx;
 }
+
+.export-btn {
+  margin-bottom: 16rpx;
+}

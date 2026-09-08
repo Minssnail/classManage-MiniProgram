@@ -1878,6 +1878,96 @@ actions['exam.pending'] = async ({ user, payload }) => {
   };
 };
 
+/**
+ * 导出补考选课表，格式对齐学校的「批量导入选课记录」模板：
+ * 第 1 行标题、第 2 行填表说明、第 3 行表头，第 4 行起为数据。
+ * 生成后传到云存储，小程序端下载并用微信的文档预览打开或转发。
+ */
+const RETAKE_TEMPLATE = {
+  sheetName: '0',
+  title: '批量导入选课记录模板',
+  notice:
+    '填表说明：\r\n' +
+    '1、以下所有标 * 的项均为必填项，请按照要求填写好再导入\r\n' +
+    '2、学生需要选补修课，学生需要重修，单科注册生的选课，有特殊选课需求的这几种情况可以使用批量导入选课功能来选课，' +
+    '其余正常按照教学计划进行选课的情况，建议采用自动生成选课功能来生成选课\r\n' +
+    '3、新生学生学号填写身份证，老生填写学生学号。',
+  header: ['学生姓名 *', '学生学号 *', '课程代码 *', '课程名称 *'],
+};
+
+actions['exam.exportRetake'] = async ({ user, payload }) => {
+  requireTeacher(user);
+
+  const resolver = await buildRuleResolver();
+  const records = await loadExamRecords(user, payload);
+  const students = await studentMap();
+
+  // 与待补考名单同口径：该门课历次考试都没及格
+  const byKey = {};
+  for (const r of records) {
+    const k = r.studentId + '|' + r.courseCode;
+    (byKey[k] = byKey[k] || []).push(r);
+  }
+
+  let rows = Object.values(byKey)
+    .filter((group) => !group.some(isPassed))
+    .map((group) => {
+      const best = group.reduce((a, b) => (scoreOf(b) > scoreOf(a) ? b : a));
+      const student = students[best.studentId];
+      const course = resolver.courseFor(best.studentId, best.courseCode);
+      return {
+        studentId: best.studentId,
+        studentName: student ? student.name : '',
+        // 学号尚未下发的学生，模板要求填身份证，系统里没有，留空由教师补
+        账号: student && student.studentIdAssigned === false ? '' : best.studentId,
+        courseCode: best.courseCode,
+        courseName: best.courseName,
+        isRequired: isRequiredCourse(course),
+        missingId: !!(student && student.studentIdAssigned === false),
+      };
+    });
+
+  if (payload.requiredOnly) rows = rows.filter((r) => r.isRequired);
+  rows.sort(
+    (a, b) =>
+      (a.studentName || '').localeCompare(b.studentName || '') ||
+      a.courseCode.localeCompare(b.courseCode)
+  );
+
+  if (!rows.length) fail('当前筛选条件下没有待补考科目，无需导出');
+
+  const XLSX = require('xlsx');
+  const aoa = [
+    [RETAKE_TEMPLATE.title],
+    [RETAKE_TEMPLATE.notice],
+    RETAKE_TEMPLATE.header,
+    ...rows.map((r) => [r.studentName, r.账号, r.courseCode, r.courseName]),
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 30 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, RETAKE_TEMPLATE.sheetName);
+  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+  const stamp = beijingDay().replace(/-/g, '');
+  const scopeTag = payload.requiredOnly ? '统设必修' : '全部课程';
+  const className = (await resolveClassName(user, payload)) || '全部班级';
+  const cloudPath = `retake/${stamp}-${className}-${scopeTag}-${Date.now()}.xlsx`;
+  const upload = await cloud.uploadFile({ cloudPath, fileContent: buffer });
+
+  const missing = rows.filter((r) => r.missingId);
+  return {
+    fileID: upload.fileID,
+    fileName: `补考选课-${className}-${scopeTag}-${stamp}.xlsx`,
+    rowCount: rows.length,
+    studentCount: new Set(rows.map((r) => r.studentId)).size,
+    scope: scopeTag,
+    className,
+    // 模板要求新生填身份证，系统里没有该字段，这些行的学号留空需教师补齐
+    missingStudentId: missing.map((r) => r.studentName),
+  };
+};
+
 // 给班级绑定专业规则，课程与成绩查询据此确定适用的规则版本
 actions['class.setRule'] = async ({ user, payload }) => {
   requireTeacher(user);

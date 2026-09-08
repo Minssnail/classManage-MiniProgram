@@ -136,6 +136,14 @@
       <view class="pending-note">
         某门课的历次考试都没有及格才计入；补考通过后会自动消失。
       </view>
+      <button
+        wx:if="{{isTeacher && pending.total}}"
+        class="btn btn-ghost export-btn"
+        loading="{{exporting}}"
+        bindtap="onExportRetake"
+      >
+        导出补考选课表
+      </button>
       <view wx:for="{{pending.pending}}" wx:key="courseCode" class="list-item">
         <view class="main">
           <view class="title">

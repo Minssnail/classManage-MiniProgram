@@ -4,6 +4,7 @@
   "description": "班级积分管理系统业务云函数",
   "main": "index.js",
   "dependencies": {
-    "wx-server-sdk": "~2.6.3"
+    "wx-server-sdk": "~2.6.3",
+    "xlsx": "^0.18.5"
   }
 }
