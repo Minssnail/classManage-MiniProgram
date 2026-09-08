@@ -14,6 +14,7 @@ Page({
     phone: '',
     submitting: false,
     students: [],
+    majors: [],
     pendingCount: 0,
     loaded: false,
   },
@@ -54,6 +55,8 @@ Page({
         // 未分配学号的新生展示手机号，避免把占位键当成学号
         idLabel: s.studentIdAssigned ? s.studentId : '待分配学号',
         subLabel: s.phone || (s.studentIdAssigned ? '' : s.studentId),
+        // 单独绑定过规则的标出来，其余沿用班级默认
+        ruleLabel: s.ruleName ? s.ruleName + (s.ownRuleCode ? '（单独指定）' : '') : '未绑定专业规则',
       }));
       this.setData({
         students,
@@ -151,6 +154,41 @@ Page({
     } catch (err) {
       // 错误提示已在 api 层弹出
     }
+  },
+
+  // 同一个班可能混着不同入学年份的学生，可按人指定规则版本
+  async onSetStudentRule(e) {
+    const { key, name } = e.currentTarget.dataset;
+    if (!this.data.majors.length) {
+      try {
+        const res = await api.call('major.list', {}, { loading: false, silent: true });
+        this.setData({ majors: res.majors || [] });
+      } catch (err) {
+        // 下面会提示
+      }
+    }
+    const majors = this.data.majors.slice(0, 5);
+    if (!majors.length) {
+      util.toast('请先在「我的 → 导入课程与成绩」中导入专业规则');
+      return;
+    }
+    const labels = majors.map((m) => m.name + ' ' + m.enrollTerm);
+    wx.showActionSheet({
+      itemList: labels.concat(['沿用班级默认']),
+      success: async (res) => {
+        const picked = res.tapIndex < majors.length ? majors[res.tapIndex] : null;
+        try {
+          const out = await api.call('student.setRule', {
+            studentId: key,
+            ruleCode: picked ? picked.ruleCode : '',
+          });
+          util.toast(out.message, 'success');
+          await this.loadStudents();
+        } catch (err) {
+          // 错误提示已在 api 层弹出
+        }
+      },
+    });
   },
 
   onOpenPrivacy(e) {

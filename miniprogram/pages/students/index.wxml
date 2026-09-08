@@ -46,6 +46,7 @@
           <text class="{{item.studentIdAssigned ? '' : 'pending'}}">{{item.idLabel}}</text>
           <text wx:if="{{item.subLabel}}"> · {{item.subLabel}}</text>
         </view>
+        <view class="desc">{{item.ruleLabel}}</view>
         <view class="row-actions">
           <view
             wx:if="{{!item.studentIdAssigned}}"
@@ -55,6 +56,14 @@
             bindtap="onAssignStudentId"
           >
             补录学号
+          </view>
+          <view
+            class="btn btn-plain btn-sm"
+            data-key="{{item.studentId}}"
+            data-name="{{item.name}}"
+            bindtap="onSetStudentRule"
+          >
+            专业规则
           </view>
           <view
             class="btn btn-plain btn-sm"

@@ -29,11 +29,13 @@
 
 .row-actions {
   display: flex;
+  flex-wrap: wrap;
   margin-top: 14rpx;
 }
 
 .row-actions .btn {
   margin-right: 16rpx;
+  margin-bottom: 10rpx;
 }
 
 .privacy-note {

@@ -563,12 +563,29 @@ actions['student.list'] = async ({ user, payload }) => {
   for (const record of scores) {
     totals[record.studentId] = (totals[record.studentId] || 0) + record.score;
   }
+  const resolver = await buildRuleResolver();
+  let majors = [];
+  try {
+    majors = await fetchAll(db.collection('majors'));
+  } catch (e) {
+    // majors 集合可能尚未创建
+  }
+  const majorByRule = {};
+  for (const m of majors) majorByRule[m.ruleCode] = m;
+
   return {
-    students: students.map((s) => ({
-      ...s,
-      totalScore: totals[s.studentId] || 0,
-      studentIdAssigned: s.studentIdAssigned !== false,
-    })),
+    students: students.map((s) => {
+      const rule = resolver.ruleOf(s.studentId);
+      return {
+        ...s,
+        totalScore: totals[s.studentId] || 0,
+        studentIdAssigned: s.studentIdAssigned !== false,
+        // 学生自己绑定的规则，为空表示沿用班级默认
+        ownRuleCode: s.ruleCode || null,
+        ruleCode: rule,
+        ruleName: majorByRule[rule] ? majorByRule[rule].name + ' ' + majorByRule[rule].enrollTerm : null,
+      };
+    }),
     semesterId,
     className,
   };
@@ -712,6 +729,39 @@ actions['student.resetPassword'] = async ({ user, payload }) => {
     name: student.name,
     loginAccount: accounts.data[0].username,
     initialPassword: STUDENT_INITIAL_PASSWORD,
+  };
+};
+
+/**
+ * 单独指定某名学生适用的专业规则。
+ * 同一个班可能有不同入学年份的学生，他们的规则版本不同；
+ * 传空则清除单独设置，改为沿用所在班级的默认规则。
+ */
+actions['student.setRule'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const account = String(payload.studentId || payload.account || '').trim();
+  const ruleCode = String(payload.ruleCode || '').trim();
+  if (!account) fail('请提供学号或手机号');
+
+  let res = await db.collection('students').where({ studentId: account }).limit(1).get();
+  if (!res.data.length) {
+    res = await db.collection('students').where({ phone: account }).limit(1).get();
+  }
+  const student = res.data[0];
+  if (!student) fail('未找到该学生：' + account);
+
+  let major = null;
+  if (ruleCode) {
+    const m = await db.collection('majors').where({ ruleCode }).limit(1).get();
+    if (!m.data.length) fail('专业规则不存在：' + ruleCode);
+    major = m.data[0];
+  }
+  await db.collection('students').doc(student._id).update({ data: { ruleCode: ruleCode || null } });
+
+  return {
+    message: major
+      ? `${student.name} 已改用「${major.name} ${major.enrollTerm}」规则`
+      : `${student.name} 已恢复为沿用班级默认规则`,
   };
 };
 
@@ -1434,12 +1484,63 @@ async function resolveRuleCode(user, payload) {
   const explicit = String((payload && payload.ruleCode) || '').trim();
   if (explicit && user.role === 'teacher') return explicit;
 
+  // 学生看自己的规则：先看学生档案上的绑定，再退到班级默认
+  if (user.role === 'student') {
+    const students = await studentMap();
+    const me = students[user.studentId];
+    if (me && me.ruleCode) return me.ruleCode;
+  }
+
   const className = await resolveClassName(user, payload);
   const cls = await getClassDoc(className);
   if (cls && cls.ruleCode) return cls.ruleCode;
 
   const majors = await fetchAll(db.collection('majors'));
   return majors.length ? majors[0].ruleCode : null;
+}
+
+/**
+ * 逐个学生解析适用的专业规则。
+ * 同一个班可能有不同入学年份的学生（补入班级、留级、转专业），
+ * 他们适用的规则版本不同，成绩统计必须按人取规则，不能整班共用一套。
+ */
+async function buildRuleResolver() {
+  const [students, classes, majors, courses] = await Promise.all([
+    fetchAll(db.collection('students')),
+    fetchAll(db.collection('classes')),
+    fetchAll(db.collection('majors')).catch(() => []),
+    fetchAll(db.collection('courses')).catch(() => []),
+  ]);
+
+  const classRule = {};
+  for (const c of classes) classRule[c.name] = c.ruleCode || null;
+
+  const fallbackRule = majors.length ? majors[0].ruleCode : null;
+  const ruleOfStudent = {};
+  for (const st of students) {
+    ruleOfStudent[st.studentId] = st.ruleCode || classRule[st.className] || fallbackRule || null;
+  }
+
+  const byRule = {};
+  const anyCourse = {};
+  for (const c of courses) {
+    (byRule[c.ruleCode] = byRule[c.ruleCode] || {})[c.code] = c;
+    if (!anyCourse[c.code]) anyCourse[c.code] = c;
+  }
+
+  return {
+    ruleOf(studentId) {
+      return ruleOfStudent[studentId] || fallbackRule || null;
+    },
+    // 本规则内找不到时回退到其他规则版本，并标记来源，避免丢失学分与性质
+    courseFor(studentId, code) {
+      const rule = this.ruleOf(studentId);
+      const own = rule && byRule[rule] ? byRule[rule][code] : null;
+      if (own) return { ...own, fromOtherRule: false };
+      if (anyCourse[code]) return { ...anyCourse[code], fromOtherRule: true };
+      return null;
+    },
+  };
 }
 
 /**
@@ -1586,8 +1687,7 @@ async function loadExamRecords(user, payload) {
 // 成绩查询：保留原表全部字段，并补上课程规则里的学分与性质
 actions['exam.list'] = async ({ user, payload }) => {
   requireLogin(user);
-  const ruleCode = await resolveRuleCode(user, payload);
-  const index = await courseIndex(ruleCode);
+  const resolver = await buildRuleResolver();
   const students = await studentMap();
 
   let records = await loadExamRecords(user, payload);
@@ -1602,14 +1702,16 @@ actions['exam.list'] = async ({ user, payload }) => {
       (r) => r.courseName.indexOf(keyword) >= 0 || r.courseCode.indexOf(keyword) >= 0
     );
   }
-  if (payload.requiredOnly) records = records.filter((r) => isRequiredCourse(index.get(r.courseCode)));
+  if (payload.requiredOnly) {
+    records = records.filter((r) => isRequiredCourse(resolver.courseFor(r.studentId, r.courseCode)));
+  }
   if (payload.failedOnly) records = records.filter((r) => !isPassed(r));
   if (payload.bestOnly) records = bestAttempts(records);
 
   records.sort((a, b) => (a.term < b.term ? 1 : a.term > b.term ? -1 : a.courseCode < b.courseCode ? -1 : 1));
 
   const decorated = records.slice(0, Number(payload.limit) || 300).map((r) => {
-    const c = index.get(r.courseCode);
+    const c = resolver.courseFor(r.studentId, r.courseCode);
     return {
       ...r,
       studentName: students[r.studentId] ? students[r.studentId].name : null,
@@ -1619,9 +1721,10 @@ actions['exam.list'] = async ({ user, payload }) => {
       examUnit: c ? c.examUnit : null,
       level2Module: c ? c.level2Module : null,
       isRequired: isRequiredCourse(c),
-      // 该课不在本专业规则内，属性取自其他规则版本
+      // 该课不在本人适用的专业规则内，属性取自其他规则版本
       fromOtherRule: c ? c.fromOtherRule : false,
-      inPlan: !!c,
+      inPlan: !!(c && !c.fromOtherRule),
+      ruleCode: resolver.ruleOf(r.studentId),
     };
   });
 
@@ -1629,7 +1732,6 @@ actions['exam.list'] = async ({ user, payload }) => {
     records: decorated,
     total: records.length,
     terms: [...new Set((await loadExamRecords(user, payload)).map((r) => r.term))].sort().reverse(),
-    ruleCode,
   };
 };
 
@@ -1638,9 +1740,11 @@ actions['exam.list'] = async ({ user, payload }) => {
  * 含未过：每门课取最高综合成绩后平均，未通过的课按实际分数计入（无效课程为 0）；
  * 仅已过：只统计已及格的课程。两者差距越大，说明挂科拖累越重。
  */
-function summarize(records, index, scope) {
+function summarize(records, resolver, scope) {
   let rows = bestAttempts(records);
-  if (scope === 'required') rows = rows.filter((r) => isRequiredCourse(index.get(r.courseCode)));
+  if (scope === 'required') {
+    rows = rows.filter((r) => isRequiredCourse(resolver.courseFor(r.studentId, r.courseCode)));
+  }
 
   const passed = rows.filter(isPassed);
   const pending = rows.filter((r) => !isPassed(r));
@@ -1648,7 +1752,7 @@ function summarize(records, index, scope) {
     arr.length ? Math.round((arr.reduce((n, v) => n + v, 0) / arr.length) * 10) / 10 : null;
 
   const creditsOf = (r) => {
-    const c = index.get(r.courseCode);
+    const c = resolver.courseFor(r.studentId, r.courseCode);
     return c && Number.isFinite(c.credits) ? c.credits : 0;
   };
 
@@ -1666,32 +1770,38 @@ function summarize(records, index, scope) {
 
 actions['exam.summary'] = async ({ user, payload }) => {
   requireLogin(user);
-  const ruleCode = await resolveRuleCode(user, payload);
-  const index = await courseIndex(ruleCode);
+  const resolver = await buildRuleResolver();
   const records = await loadExamRecords(user, payload);
   const students = await studentMap();
+  const majors = await fetchAll(db.collection('majors')).catch(() => []);
+  const majorByRule = {};
+  for (const m of majors) majorByRule[m.ruleCode] = m;
 
   const ids = [...new Set(records.map((r) => r.studentId))];
   const perStudent = ids
     .map((sid) => {
       const mine = records.filter((r) => r.studentId === sid);
+      const rule = resolver.ruleOf(sid);
       return {
         studentId: sid,
         name: students[sid] ? students[sid].name : null,
         className: students[sid] ? students[sid].className : null,
-        required: summarize(mine, index, 'required'),
-        all: summarize(mine, index, 'all'),
+        ruleCode: rule,
+        ruleName: majorByRule[rule] ? majorByRule[rule].enrollTerm : null,
+        required: summarize(mine, resolver, 'required'),
+        all: summarize(mine, resolver, 'all'),
       };
     })
     .sort((a, b) => (b.all.avgIncludingFailed || 0) - (a.all.avgIncludingFailed || 0));
 
   return {
-    ruleCode,
     studentCount: ids.length,
     students: perStudent,
+    // 班里可能混着不同规则版本的学生，列出来便于核对
+    ruleCodes: [...new Set(perStudent.map((s) => s.ruleCode).filter(Boolean))],
     overall: {
-      required: summarize(records, index, 'required'),
-      all: summarize(records, index, 'all'),
+      required: summarize(records, resolver, 'required'),
+      all: summarize(records, resolver, 'all'),
     },
   };
 };
@@ -1702,8 +1812,7 @@ actions['exam.summary'] = async ({ user, payload }) => {
  */
 actions['exam.pending'] = async ({ user, payload }) => {
   requireLogin(user);
-  const ruleCode = await resolveRuleCode(user, payload);
-  const index = await courseIndex(ruleCode);
+  const resolver = await buildRuleResolver();
   const records = await loadExamRecords(user, payload);
   const students = await studentMap();
 
@@ -1717,7 +1826,7 @@ actions['exam.pending'] = async ({ user, payload }) => {
     .filter((group) => !group.some(isPassed))
     .map((group) => {
       const best = group.reduce((a, b) => (scoreOf(b) > scoreOf(a) ? b : a));
-      const c = index.get(best.courseCode);
+      const c = resolver.courseFor(best.studentId, best.courseCode);
       return {
         studentId: best.studentId,
         studentName: students[best.studentId] ? students[best.studentId].name : null,
@@ -1747,7 +1856,6 @@ actions['exam.pending'] = async ({ user, payload }) => {
   );
 
   return {
-    ruleCode,
     pending,
     total: pending.length,
     requiredTotal: pending.filter((p) => p.isRequired).length,
