@@ -252,6 +252,20 @@ async function buildScope(user, payload) {
   };
 }
 
+/**
+ * 取班级档案；classes 集合里没有、但确实有学生挂在该班名下时，按需补建。
+ * 早期数据的班级只存在于学生记录上，class.list 会把它们列出来，
+ * 若这里不补建，改入学学期或专业规则就会报「班级不存在」。
+ */
+async function getOrCreateClassDoc(className, user) {
+  const existing = await getClassDoc(className);
+  if (existing) return existing;
+  const used = await db.collection('students').where({ className }).count();
+  if (!used.total) return null;
+  await ensureClass(className, user);
+  return getClassDoc(className);
+}
+
 // 取班级档案（含入学学期）；班级不存在时返回 null
 async function getClassDoc(className) {
   if (!className) return null;
@@ -900,8 +914,8 @@ actions['class.setStartSemester'] = async ({ user, payload }) => {
   requireTeacher(user);
   const name = String(payload.name || '').trim();
   if (!name) fail('班级名称不能为空');
-  const cls = await getClassDoc(name);
-  if (!cls) fail('班级不存在');
+  const cls = await getOrCreateClassDoc(name, user);
+  if (!cls) fail('班级不存在：' + name);
 
   let startSemester = null;
   if (payload.semesterId) {
@@ -1870,8 +1884,8 @@ actions['class.setRule'] = async ({ user, payload }) => {
   const name = String(payload.name || '').trim();
   const ruleCode = String(payload.ruleCode || '').trim();
   if (!name) fail('班级名称不能为空');
-  const cls = await getClassDoc(name);
-  if (!cls) fail('班级不存在');
+  const cls = await getOrCreateClassDoc(name, user);
+  if (!cls) fail('班级不存在：' + name);
 
   if (ruleCode) {
     const major = await db.collection('majors').where({ ruleCode }).limit(1).get();
