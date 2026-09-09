@@ -8,7 +8,42 @@ backup/
   ranking/   脱敏后的排行榜快照 —— 提交进仓库
 ```
 
-## 怎么做一次快照
+## 一、每周自动归档（推荐）
+
+云函数带一个定时触发器 `weeklyRankingSnapshot`，**每周一 03:00（北京时间）**自动跑一次：
+直接读数据库算出排行榜，脱敏成 Markdown，再通过 Gitee OpenAPI 提交到
+`backup/ranking/YYYY-MM-DD.md`。云函数里没有 git，走的是仓库文件接口，不需要本机开着。
+
+同一份内容也会存进云存储 `ranking-snapshot/`，Gitee 那边万一出问题也不至于这周白跑。
+
+### 配置
+
+Gitee 令牌不能写进代码，放在云函数的环境变量里：
+云开发控制台 → 云函数 → `classmanage` → 版本与配置 → 环境变量。
+
+| 变量 | 必需 | 说明 |
+| --- | --- | --- |
+| `GITEE_TOKEN` | 是 | Gitee 私人令牌，[设置 → 私人令牌](https://gitee.com/profile/personal_access_tokens) 生成，勾选 `projects` 权限 |
+| `GITEE_OWNER` | 是 | 仓库拥有者，如 `minssnail` |
+| `GITEE_REPO` | 是 | 仓库名，如 `class-manage-mini-program` |
+| `GITEE_BRANCH` | 否 | 默认 `master` |
+
+三个必需变量缺任意一个就只写云存储、不推 Gitee，并在返回里说明原因——不会静默失败。
+
+### 验证与排查
+
+云函数测试面板传 `{"action": "snapshot.run"}`（需教师登录态）可立即跑一次，
+返回里能看到文件路径、学生数、记录数和 Gitee 的提交结果。
+`{"action": "snapshot.status"}` 查看配置是否齐备与最近 10 次归档记录。
+
+定时触发没有调用方能看返回值，因此每次跑完都会往 `snapshotLogs` 集合写一条日志，
+成功失败都记，失败还带上错误原文。
+
+> 令牌有有效期，过期后定时任务会连续失败。`snapshot.status` 的最近记录里能一眼看到。
+
+## 二、手工快照（本机）
+
+云函数那条路不通时的备用方案，或者你想先看看内容再提交。
 
 **1. 从云开发控制台导出**
 
@@ -30,8 +65,9 @@ node scripts/snapshot-ranking.js            # 只生成，自己检查后再提�
 git push
 ```
 
-产物是 `backup/ranking/YYYY-MM-DD.md`，按「班级 → 学期」分组，每个班的每个学期各一份榜单，
-当前学期与历史学期都会归档。同一天重复执行会覆盖当天的文件；内容没变化时 `--commit` 不会产生空提交。
+产物是 `backup/ranking/YYYY-MM-DD.md`，与自动归档写的是同一个路径、同样的格式，
+按「班级 → 学期」分组，每个班的每个学期各一份榜单，当前学期与历史学期都会归档。
+同一天重复执行会覆盖当天的文件；内容没变化时 `--commit` 不会产生空提交。
 
 ## 脱敏规则
 

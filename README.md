@@ -183,6 +183,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | `semesters` | 学期 | `name`、`startDate`、`endDate`、`isCurrent`、`isArchived` |
 | `scoreRecords` | 积分记录 | `studentId`、`semesterId`、`scoreType`、`session`、`score`、`reason`、`operator`、`timestamp`、`day`、`codeId` |
 | `rewards` | 奖励 | `studentId`、`semesterId`、`rewardType`、`certificateImage`、`isRedeemed`、`redeemedAt` |
+| `snapshotLogs` | 归档日志 | `day`、`trigger`、`ok`、`error`、`gitee`、`createdAt` |
 | `attendanceCodes` | 考勤二维码 | `token`、`ttl`、`className`、`session`、`expireAt`、`day`、`revoked`、`checkinCount`、`createdBy` |
 
 密码使用 PBKDF2-SHA256（10000 轮，每账号独立盐）存储，云函数内校验时做定长比较。
@@ -205,6 +206,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.manualCheckin`、`attendance.today` |
 | 奖励 | `reward.add`、`reward.list`、`reward.redeem`、`reward.unredeem` |
 | 统计 | `stats.overview`、`stats.ranking`、`stats.trend` |
+| 备份 | `snapshot.run`、`snapshot.status`（另有定时触发器每周自动归档） |
 | 学期 | `semester.list`、`semester.current`、`semester.create`、`semester.setCurrent`、`semester.archive`、`semester.remove` |
 
 权限在服务端判定：教师可管理全部数据；学生可查看**本班**的积分记录（沿用 Web 版的互相监督设定，

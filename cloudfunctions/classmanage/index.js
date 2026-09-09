@@ -2450,7 +2450,334 @@ actions['semester.remove'] = async ({ user, payload }) => {
 // 入口
 // ============================================================
 
+// ---------- 积分排行榜快照 ----------
+
+/**
+ * 每周把积分排行榜脱敏后归档到 Gitee，云端数据万一丢失还能还原每个人的积分。
+ *
+ * 由 config.json 里的定时触发器每周执行一次，教师也可在「我的 → 数据备份」里手动跑。
+ * 走 Gitee OpenAPI 直接提交文件，云函数里没有 git，也不需要本机开着。
+ *
+ * 脱敏规则与 scripts/snapshot-ranking.js 一致：姓名只留姓氏，学号手机只留后 4 位。
+ * 教师对照名册能还原到人，但仓库里看不到完整身份。
+ */
+const SNAPSHOT_DIR = 'backup/ranking';
+
+const SNAPSHOT_SCORE_TYPES = [
+  ['attendance', '考勤'],
+  ['homework', '课堂'],
+  ['exam', '作业'],
+  ['activity', '活动'],
+  ['other', '其他'],
+];
+
+// 星号数固定，避免连名字有几个字都泄漏出去
+function maskName(name) {
+  const s = String(name || '').trim();
+  return s ? s[0] + '**' : '（无名）';
+}
+
+function maskKey(key) {
+  const s = String(key || '').trim();
+  return s.length <= 4 ? s : '…' + s.slice(-4);
+}
+
+function buildSnapshotMarkdown(students, records, semesters, stamp) {
+  const semesterName = {};
+  for (const s of semesters) semesterName[s._id] = s.name;
+
+  const lines = [
+    '# 积分排行榜快照 · ' + stamp,
+    '',
+    '> 由云函数定时归档，姓名与标识已脱敏。共 ' +
+      students.length +
+      ' 名学生、' +
+      records.length +
+      ' 条积分记录。',
+    '',
+  ];
+
+  const classes = [...new Set(students.map((s) => s.className || '未分班'))].sort();
+  let sections = 0;
+
+  for (const className of classes) {
+    const classStudents = students.filter((s) => (s.className || '未分班') === className);
+    const ids = new Set(classStudents.map((s) => s.studentId));
+    const classRecords = records.filter((r) => ids.has(r.studentId));
+
+    lines.push('## ' + className, '');
+    if (!classRecords.length) {
+      lines.push('_本班暂无积分记录_', '');
+      sections++;
+      continue;
+    }
+
+    const semesterIds = [...new Set(classRecords.map((r) => r.semesterId || null))];
+    semesterIds.sort((a, b) => {
+      const na = semesterName[a] || '';
+      const nb = semesterName[b] || '';
+      if (!na) return 1;
+      if (!nb) return -1;
+      return na < nb ? -1 : 1;
+    });
+
+    for (const sid of semesterIds) {
+      const subset = classRecords.filter((r) => (r.semesterId || null) === sid);
+      const days = subset.map((r) => r.day).filter(Boolean).sort();
+      const range = days.length ? { from: days[0], to: days[days.length - 1] } : null;
+
+      // 没有学期名时用日期区间兜底，否则多个学期会都叫「未知学期」而无法区分
+      let label = semesterName[sid];
+      if (!label) {
+        label = sid ? '未知学期' : '未归属学期';
+        if (range) label += '（' + range.from + ' 至 ' + range.to + '）';
+      }
+
+      const totals = {};
+      const byType = {};
+      for (const r of subset) {
+        const id = r.studentId;
+        totals[id] = (totals[id] || 0) + (Number(r.score) || 0);
+        if (!byType[id]) byType[id] = {};
+        byType[id][r.scoreType] = (byType[id][r.scoreType] || 0) + (Number(r.score) || 0);
+      }
+
+      const ranking = classStudents
+        .map((s) => ({
+          name: maskName(s.name),
+          key: maskKey(s.studentId),
+          total: totals[s.studentId] || 0,
+          types: byType[s.studentId] || {},
+        }))
+        .sort((a, b) => b.total - a.total || (a.key < b.key ? -1 : 1));
+
+      const sum = ranking.reduce((n, r) => n + r.total, 0);
+      const meta = range
+        ? '记录 ' + subset.length + ' 条，合计 ' + sum + ' 分，覆盖 ' + range.from + ' 至 ' + range.to + '。'
+        : '记录 ' + subset.length + ' 条，合计 ' + sum + ' 分。';
+
+      const header =
+        '| 名次 | 姓名 | 标识 | ' + SNAPSHOT_SCORE_TYPES.map((t) => t[1]).join(' | ') + ' | 总分 |';
+      const divider =
+        '| ---: | --- | --- |' + SNAPSHOT_SCORE_TYPES.map(() => ' ---: |').join('') + ' ---: |';
+      const rows = ranking.map(
+        (r, i) =>
+          '| ' +
+          (i + 1) +
+          ' | ' +
+          r.name +
+          ' | ' +
+          r.key +
+          ' | ' +
+          SNAPSHOT_SCORE_TYPES.map((t) => r.types[t[0]] || 0).join(' | ') +
+          ' | **' +
+          r.total +
+          '** |'
+      );
+
+      lines.push('### ' + label, '', meta, '', [header, divider, ...rows].join('\n'), '');
+      sections++;
+    }
+  }
+
+  return { markdown: lines.join('\n'), classCount: classes.length, sections };
+}
+
+// Gitee OpenAPI：云函数里没有 git，直接调「仓库文件」接口提交
+function giteeConfig() {
+  const env = process.env;
+  return {
+    token: env.GITEE_TOKEN || '',
+    owner: env.GITEE_OWNER || '',
+    repo: env.GITEE_REPO || '',
+    branch: env.GITEE_BRANCH || 'master',
+  };
+}
+
+function giteeRequest(method, path, body) {
+  const https = require('https');
+  const payload = body ? JSON.stringify(body) : null;
+  const options = {
+    hostname: 'gitee.com',
+    path,
+    method,
+    headers: { Accept: 'application/json' },
+    timeout: 15000,
+  };
+  if (payload) {
+    options.headers['Content-Type'] = 'application/json';
+    options.headers['Content-Length'] = Buffer.byteLength(payload);
+  }
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let text = '';
+      res.on('data', (chunk) => (text += chunk));
+      res.on('end', () => {
+        let json = null;
+        try {
+          json = text ? JSON.parse(text) : null;
+        } catch (e) {
+          json = null;
+        }
+        resolve({ status: res.statusCode, body: json, text });
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('请求 Gitee 超时')));
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+/**
+ * 写入（或覆盖）仓库里的一个文件。
+ * Gitee 的更新接口要带上文件当前的 sha，所以先查一次：不存在就 POST 新建，存在就 PUT 覆盖。
+ */
+async function giteePutFile(cfg, filePath, content, message) {
+  const base = '/api/v5/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + filePath;
+  const query =
+    '?access_token=' + encodeURIComponent(cfg.token) + '&ref=' + encodeURIComponent(cfg.branch);
+
+  const exist = await giteeRequest('GET', base + query);
+  const sha = exist.status === 200 && exist.body ? exist.body.sha : null;
+
+  const body = {
+    access_token: cfg.token,
+    content: Buffer.from(content, 'utf8').toString('base64'),
+    message,
+    branch: cfg.branch,
+  };
+  if (sha) body.sha = sha;
+
+  const res = await giteeRequest(sha ? 'PUT' : 'POST', base, body);
+  if (res.status >= 200 && res.status < 300) {
+    return { updated: !!sha, url: res.body && res.body.content ? res.body.content.html_url : null };
+  }
+  const detail = res.body && res.body.message ? res.body.message : res.text.slice(0, 200);
+  fail('提交到 Gitee 失败（HTTP ' + res.status + '）：' + detail);
+}
+
+/**
+ * 生成快照并归档。Gitee 没配好也要照样把文件留在云存储里，
+ * 否则一个令牌过期就等于这一周的备份彻底没了。
+ */
+async function runSnapshot(trigger) {
+  const [students, records, semesters] = await Promise.all([
+    fetchAll(db.collection('students')),
+    fetchAll(db.collection('scoreRecords')),
+    fetchAll(db.collection('semesters')).catch(() => []),
+  ]);
+
+  const stamp = beijingDay();
+  const built = buildSnapshotMarkdown(students, records, semesters, stamp);
+  const filePath = SNAPSHOT_DIR + '/' + stamp + '.md';
+
+  // 云存储始终留一份，作为 Gitee 之外的第二个落点
+  const upload = await cloud.uploadFile({
+    cloudPath: 'ranking-snapshot/' + stamp + '.md',
+    fileContent: Buffer.from(built.markdown, 'utf8'),
+  });
+
+  const result = {
+    day: stamp,
+    filePath,
+    fileID: upload.fileID,
+    studentCount: students.length,
+    recordCount: records.length,
+    classCount: built.classCount,
+    sections: built.sections,
+    trigger: trigger || 'manual',
+    gitee: null,
+  };
+
+  const cfg = giteeConfig();
+  if (!cfg.token || !cfg.owner || !cfg.repo) {
+    result.gitee = {
+      pushed: false,
+      reason: '未配置 Gitee 环境变量（GITEE_TOKEN / GITEE_OWNER / GITEE_REPO），已只存云存储',
+    };
+    return result;
+  }
+
+  const pushed = await giteePutFile(
+    cfg,
+    filePath,
+    built.markdown,
+    '积分排行榜快照 ' + stamp + '（' + (trigger === 'timer' ? '定时归档' : '手动归档') + '）'
+  );
+  result.gitee = { pushed: true, ...pushed, repo: cfg.owner + '/' + cfg.repo, branch: cfg.branch };
+  return result;
+}
+
+// 教师手动归档一次，便于配好令牌后当场验证
+actions['snapshot.run'] = async ({ user }) => {
+  requireTeacher(user);
+  return runSnapshot('manual');
+};
+
+// 只看配置是否齐备与上次归档情况，不产生新文件
+actions['snapshot.status'] = async ({ user }) => {
+  requireTeacher(user);
+  const cfg = giteeConfig();
+  let recent = [];
+  try {
+    const res = await db
+      .collection('snapshotLogs')
+      .orderBy('createdAt', 'desc')
+      .limit(10)
+      .get();
+    recent = res.data || [];
+  } catch (e) {
+    recent = [];
+  }
+  return {
+    configured: !!(cfg.token && cfg.owner && cfg.repo),
+    repo: cfg.owner && cfg.repo ? cfg.owner + '/' + cfg.repo : null,
+    branch: cfg.branch,
+    dir: SNAPSHOT_DIR,
+    recent: recent.map((r) => ({
+      day: r.day,
+      trigger: r.trigger,
+      ok: r.ok,
+      error: r.error || null,
+      pushed: !!(r.gitee && r.gitee.pushed),
+      createdAt: r.createdAt,
+    })),
+  };
+};
+
+// 定时触发没有调用方可以看返回值，跑完记一条日志，出了问题事后能查
+async function handleTimer(event) {
+  await ensureCollection('snapshotLogs');
+  const trigger = 'timer';
+  try {
+    const result = await runSnapshot(trigger);
+    await db.collection('snapshotLogs').add({
+      data: { ...result, ok: true, createdAt: new Date() },
+    });
+    console.log('[classmanage] 定时快照完成', result.filePath, result.gitee);
+    return { ok: true, data: result };
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    await db.collection('snapshotLogs').add({
+      data: {
+        day: beijingDay(),
+        trigger,
+        ok: false,
+        error: message,
+        createdAt: new Date(),
+      },
+    });
+    console.error('[classmanage] 定时快照失败', event && event.TriggerName, message);
+    return { ok: false, error: message };
+  }
+}
+
 exports.main = async (event) => {
+  // 定时触发器没有调用方，也没有登录态，单独一条路径处理
+  if (event && event.Type === 'timer') return handleTimer(event);
+
   const { action, ...payload } = event || {};
   const handler = actions[action];
   if (!handler) {
