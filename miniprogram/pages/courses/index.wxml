@@ -31,6 +31,68 @@
     </view>
   </view>
 
+  <!-- 待修读 -->
+  <view class="card" wx:if="{{major && todo}}">
+    <view class="card-title">
+      待修读课程
+      <text class="explain" bindtap="onExplainTodo">怎么算的</text>
+    </view>
+    <view class="todo-stats">
+      <view class="stat">
+        <view class="stat-num">{{todo.total}}</view>
+        <view class="stat-label">待修读</view>
+      </view>
+      <view class="stat">
+        <view class="stat-num">{{todo.requiredTotal}}</view>
+        <view class="stat-label">统设必修</view>
+      </view>
+      <view class="stat">
+        <view class="stat-num">{{todo.todoCredits}}</view>
+        <view class="stat-label">涉及学分</view>
+      </view>
+      <view class="stat" wx:if="{{isTeacher}}">
+        <view class="stat-num">{{todo.studentCount}}</view>
+        <view class="stat-label">涉及学生</view>
+      </view>
+    </view>
+
+    <view class="btn-row" wx:if="{{todo.total}}">
+      <button class="btn btn-plain" bindtap="onToggleTodo">
+        {{todoOpen ? '收起清单' : '查看清单'}}
+      </button>
+      <button
+        wx:if="{{isTeacher}}"
+        class="btn btn-primary"
+        loading="{{exporting}}"
+        bindtap="onExportTodo"
+      >
+        导出待修读选课表
+      </button>
+    </view>
+
+    <view wx:if="{{todoOpen}}" class="todo-list">
+      <view wx:for="{{todoList}}" wx:key="rowKey" class="course">
+        <view class="course-head">
+          <view class="course-name">
+            <text wx:if="{{isTeacher}}">{{item.studentName}} · </text>{{item.courseName}}
+          </view>
+          <view class="course-credits">{{item.credits}} 学分</view>
+        </view>
+        <view class="course-code">{{item.courseCode}} · {{item.level2Module}}</view>
+        <view class="tags">
+          <text class="badge {{item.isRequired ? 'badge-brand' : 'badge-muted'}}">{{item.courseType}}{{item.courseNature}}</text>
+          <text class="badge {{item.examUnit === '总部' ? 'badge-warning' : 'badge-muted'}}">{{item.examUnit}}考试</text>
+          <text class="badge badge-muted">{{item.termText}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{!todo.total}}" class="empty">
+      计划内课程都已修读过
+      <view class="muted tip">没及格的科目属于重修，在「成绩查询 → 待补考」里报名。</view>
+    </view>
+  </view>
+
   <!-- 筛选 -->
   <view class="card" wx:if="{{major}}">
     <view class="tabs">

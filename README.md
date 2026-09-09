@@ -121,7 +121,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 「学生自行打卡」的入口已彻底移除：`attendance.checkin` 必须携带有效令牌才会写入考勤记录，
 补录接口 `attendance.manualCheckin` 则要求教师权限。
 
-## 五、待补考与补考选课
+## 五、待补考与待修读
 
 某门课的历次考试都没及格就计入待补考，**必修选修都算**——挂掉的选修课一样要重修。
 
@@ -133,6 +133,31 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 「学生已选版」或「全部待补考版」。补考通过后该门课自动离开名单，选课记录随之失效。
 
 待补考名单、学生选课校验与导出三处共用同一个 `computePending`，避免口径分叉。
+
+### 待修读
+
+「课程信息」页另有一份**待修读**名单：本人适用的规则里学校实际开设、但一次都没考过的课程。
+
+| | 判定 | 在哪里处理 |
+| --- | --- | --- |
+| 待补考 | 考过，但历次都没及格 | 成绩查询 → 待补考，学生勾选后教师「导出补考表」 |
+| 待修读 | 计划内、一次都没考过 | 课程信息 → 教师「导出待修读选课表」 |
+
+两者互不重叠，合起来就是学生离毕业还差的全部课程。
+
+**课程范围按规则版本各自认定**，以学校的教学进程表为准，而不是整份专业规则：
+
+| 规则版本 | 计划课程 | 实际开设 | 依据 |
+| --- | --- | --- | --- |
+| 230901308090200（23 秋） | 52 | 40 | 《23秋软件工程专业教学进程表(待修读)》 |
+| 240901308090200（24 秋） | 39 | 39 | 《2024秋季开放本科(高中起点)软件工程-专业规则》 |
+
+23 秋有 12 门选修（商务英语系列、区块链技术、软件数学基础等）学校没有开设，
+课程清单里保留但标 `offered: false`，不计入待修读。这个字段是后加的，
+老库里的课程记录会在下次 `academic.import` 时补写，没有该字段的一律当作已开设。
+
+导出的 xlsx 有两张表：第一张按学校《批量导入选课记录》模板，可直接导入教务；
+第二张「待修读明细」保留教学进程表的模块、学分、建议开设学期与考试单位，供教师核对。
 
 ## 六、数据库集合
 
@@ -160,7 +185,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 认证 | `auth.login`、`auth.me`、`auth.logout`、`auth.changePassword` |
 | 班级 | `class.list`、`class.create`、`class.rename`、`class.remove`、`class.setStartSemester`、`class.importRoster` |
 | 学生 | `student.list`、`student.add`、`student.assignStudentId`、`student.resetPassword`、`student.setRule` |
-| 课程成绩 | `academic.import`、`major.list`、`course.list`、`exam.list`、`exam.summary`、`exam.pending`、`exam.exportRetake` |
+| 课程成绩 | `academic.import`、`major.list`、`course.list`、`course.todo`、`course.exportTodo`、`exam.list`、`exam.summary`、`exam.pending`、`exam.exportRetake` |
 | 补考选课 | `retake.select`、`retake.submit` |
 | 积分 | `score.add`、`score.list` |
 | 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.manualCheckin`、`attendance.today` |

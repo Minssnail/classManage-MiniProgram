@@ -1560,6 +1560,17 @@ async function buildRuleResolver() {
     ruleOf(studentId) {
       return ruleOfStudent[studentId] || fallbackRule || null;
     },
+    /**
+     * 该学生适用规则下、学校实际开设的课程，按教学进程表的顺序返回。
+     * offered 是后加的字段，老库里没有的一律当作开设，避免升级前的数据整批消失。
+     */
+    offeredCoursesOf(studentId) {
+      const rule = this.ruleOf(studentId);
+      if (!rule || !byRule[rule]) return [];
+      return Object.values(byRule[rule])
+        .filter((c) => c.offered !== false)
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+    },
     // 本规则内找不到时回退到其他规则版本，并标记来源，避免丢失学分与性质
     courseFor(studentId, code) {
       const rule = this.ruleOf(studentId);
@@ -1604,7 +1615,7 @@ actions['academic.import'] = async ({ user, payload }) => {
   const majors = Array.isArray(payload.majors) ? payload.majors : [];
   const courses = Array.isArray(payload.courses) ? payload.courses : [];
   const scores = Array.isArray(payload.scores) ? payload.scores : [];
-  const result = { majors: 0, courses: 0, scores: 0, skipped: 0 };
+  const result = { majors: 0, courses: 0, scores: 0, updated: 0, skipped: 0 };
 
   const [existMajors, existCourses, existScores] = await Promise.all([
     fetchAll(db.collection('majors')),
@@ -1613,6 +1624,8 @@ actions['academic.import'] = async ({ user, payload }) => {
   ]);
   const majorKeys = new Set(existMajors.map((m) => m.ruleCode));
   const courseKeys = new Set(existCourses.map((c) => c.ruleCode + '|' + c.code));
+  const courseById = {};
+  for (const c of existCourses) courseById[c.ruleCode + '|' + c.code] = c;
   const scoreKeys = new Set(
     existScores.map((s) => [s.term, s.studentId, s.courseCode, s.paperNo].join('|'))
   );
@@ -1630,7 +1643,17 @@ actions['academic.import'] = async ({ user, payload }) => {
   for (const c of courses) {
     const k = c.ruleCode + '|' + c.code;
     if (courseKeys.has(k)) {
-      result.skipped++;
+      // 导入是幂等的，但 offered（学校是否实际开设）是后加的字段，
+      // 老库里的课程没有，这里补上，否则待修读会把没开设的选修课也算进去
+      const old = courseById[k];
+      if (old && typeof c.offered === 'boolean' && old.offered !== c.offered) {
+        result.updated++;
+        writes.push(
+          db.collection('courses').doc(old._id).update({ data: { offered: c.offered } })
+        );
+      } else {
+        result.skipped++;
+      }
       continue;
     }
     courseKeys.add(k);
@@ -2037,6 +2060,169 @@ const RETAKE_TEMPLATE = {
     '其余正常按照教学计划进行选课的情况，建议采用自动生成选课功能来生成选课\r\n' +
     '3、新生学生学号填写身份证，老生填写学生学号。',
   header: ['学生姓名 *', '学生学号 *', '课程代码 *', '课程名称 *'],
+};
+
+/**
+ * 待修读：本人适用规则里学校实际开设、但从未修读过的课程。
+ *
+ * 与待补考互不重叠——考过没及格的属于重修，走补考表；这里只列一次都没考过的。
+ * 课程范围以各自规则版本的教学进程表为准：23 秋见「教学进程表(待修读)」列出的
+ * 40 门（完整计划 52 门里有 12 门选修未开设），24 秋见专业规则 xls 的 39 门。
+ */
+async function computeTodo(user, payload) {
+  const [resolver, students] = await Promise.all([buildRuleResolver(), studentMap()]);
+  const records = await loadExamRecords(user, payload);
+
+  const scopeIds = await examScopeStudentIds(user, payload);
+  const all = Object.values(students);
+  const inScope = scopeIds ? all.filter((st) => scopeIds.indexOf(st.studentId) >= 0) : all;
+
+  // 修读过就不再是待修读，无论及格与否
+  const taken = {};
+  for (const r of records) {
+    (taken[r.studentId] = taken[r.studentId] || new Set()).add(r.courseCode);
+  }
+
+  const rows = [];
+  for (const st of inScope) {
+    const done = taken[st.studentId] || new Set();
+    for (const c of resolver.offeredCoursesOf(st.studentId)) {
+      if (done.has(c.code)) continue;
+      rows.push({
+        studentId: st.studentId,
+        studentName: st.name || null,
+        className: st.className || null,
+        ruleCode: c.ruleCode,
+        order: c.order,
+        courseCode: c.code,
+        courseName: c.name,
+        credits: c.credits,
+        courseType: c.courseType,
+        courseNature: c.courseNature,
+        examUnit: c.examUnit,
+        suggestedTerm: c.suggestedTerm,
+        level1Module: c.level1Module,
+        level2Module: c.level2Module,
+        isRequired: isRequiredCourse(c),
+      });
+    }
+  }
+
+  if (payload.requiredOnly) return rows.filter((r) => r.isRequired);
+  return rows;
+}
+
+actions['course.todo'] = async ({ user, payload }) => {
+  requireLogin(user);
+  const rows = await computeTodo(user, payload);
+  rows.sort(
+    (a, b) =>
+      (a.studentName || '').localeCompare(b.studentName || '') || (a.order || 0) - (b.order || 0)
+  );
+  return {
+    todo: rows,
+    total: rows.length,
+    requiredTotal: rows.filter((r) => r.isRequired).length,
+    todoCredits: rows.reduce((n, r) => n + (r.credits || 0), 0),
+    studentCount: new Set(rows.map((r) => r.studentId)).size,
+  };
+};
+
+/**
+ * 待修读选课表：
+ *   Sheet「0」按学校《批量导入选课记录》模板，可直接导入教务；
+ *   Sheet「待修读明细」保留教学进程表的模块、学分、建议开设学期，供教师核对。
+ */
+actions['course.exportTodo'] = async ({ user, payload }) => {
+  requireTeacher(user);
+
+  const students = await studentMap();
+  const rows = await computeTodo(user, payload);
+  rows.sort(
+    (a, b) =>
+      (a.studentName || '').localeCompare(b.studentName || '') || (a.order || 0) - (b.order || 0)
+  );
+
+  if (!rows.length) {
+    fail(
+      payload.requiredOnly
+        ? '当前范围内没有待修读的统设必修课，无需导出'
+        : '当前范围内没有待修读课程，无需导出'
+    );
+  }
+
+  const XLSX = require('xlsx');
+  const wb = XLSX.utils.book_new();
+
+  // 学号尚未下发的新生，模板要求填身份证，系统里没有，留空由教师补
+  const accountOf = (r) => {
+    const st = students[r.studentId];
+    return st && st.studentIdAssigned === false ? '' : r.studentId;
+  };
+
+  const main = XLSX.utils.aoa_to_sheet([
+    [RETAKE_TEMPLATE.title],
+    [RETAKE_TEMPLATE.notice],
+    RETAKE_TEMPLATE.header,
+    ...rows.map((r) => [r.studentName || '', accountOf(r), r.courseCode, r.courseName]),
+  ]);
+  main['!cols'] = [{ wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 30 }];
+  XLSX.utils.book_append_sheet(wb, main, RETAKE_TEMPLATE.sheetName);
+
+  const detail = XLSX.utils.aoa_to_sheet([
+    [
+      '学生姓名',
+      '学生学号',
+      '一级模块',
+      '二级模块',
+      '序号',
+      '课程代码',
+      '课程名称',
+      '学分',
+      '课程类型',
+      '课程性质',
+      '建议开设学期',
+      '考试单位',
+    ],
+    ...rows.map((r) => [
+      r.studentName || '',
+      accountOf(r),
+      r.level1Module || '',
+      r.level2Module || '',
+      r.order || '',
+      r.courseCode,
+      r.courseName,
+      r.credits || '',
+      r.courseType || '',
+      r.courseNature || '',
+      r.suggestedTerm ? '第 ' + r.suggestedTerm + ' 学期' : '',
+      r.examUnit || '',
+    ]),
+  ]);
+  detail['!cols'] = [
+    { wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 14 }, { wch: 6 }, { wch: 12 },
+    { wch: 30 }, { wch: 6 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 10 },
+  ];
+  XLSX.utils.book_append_sheet(wb, detail, '待修读明细');
+
+  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const stamp = beijingDay().replace(/-/g, '');
+  const scopeTag = payload.requiredOnly ? '统设必修' : '全部课程';
+  const className = (await resolveClassName(user, payload)) || '全部班级';
+  const cloudPath = `todo/${stamp}-${className}-${scopeTag}-${Date.now()}.xlsx`;
+  const upload = await cloud.uploadFile({ cloudPath, fileContent: buffer });
+
+  const missing = rows.filter((r) => !accountOf(r));
+  return {
+    fileID: upload.fileID,
+    fileName: `待修读选课-${className}-${scopeTag}-${stamp}.xlsx`,
+    rowCount: rows.length,
+    studentCount: new Set(rows.map((r) => r.studentId)).size,
+    todoCredits: rows.reduce((n, r) => n + (r.credits || 0), 0),
+    scope: scopeTag,
+    className,
+    missingStudentId: [...new Set(missing.map((r) => r.studentName))],
+  };
 };
 
 actions['exam.exportRetake'] = async ({ user, payload }) => {

@@ -37,6 +37,32 @@
   margin-top: 4rpx;
 }
 
+.explain {
+  font-size: 22rpx;
+  font-weight: 400;
+  color: var(--brand);
+}
+
+/* 待修读的数字条在普通白卡里，不能沿用专业卡那套浅色文字 */
+.todo-stats {
+  display: flex;
+  margin: 8rpx 0 20rpx;
+}
+
+.todo-stats .stat-num {
+  color: var(--text);
+}
+
+.todo-stats .stat-label {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.todo-list {
+  margin-top: 8rpx;
+  border-top: 2rpx solid var(--border);
+}
+
 .tabs {
   display: flex;
   background: #f1f3f7;

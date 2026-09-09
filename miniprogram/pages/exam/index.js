@@ -260,7 +260,7 @@ Page({
     const ok = await util.confirm(
       `将导出${selectedOnly ? '学生已报名的' : '全部待补考的'}科目（必修选修都含），` +
         '格式对齐学校的「批量导入选课记录」模板。',
-      '导出补考选课表'
+      '导出补考表'
     );
     if (!ok) return;
 

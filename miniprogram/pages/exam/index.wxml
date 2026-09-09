@@ -142,7 +142,7 @@
       <view class="select-bar" wx:if="{{isTeacher && pending.total}}">
         <text>已报名 {{pending.selectedTotal}} 门 · {{pending.selectedStudentCount}} 人</text>
         <view class="btn btn-ghost btn-sm" loading="{{exporting}}" bindtap="onExportRetake">
-          导出选课表
+          导出补考表
         </view>
       </view>
 
