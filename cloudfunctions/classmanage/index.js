@@ -2128,11 +2128,7 @@ actions['course.todo'] = async ({ user, payload }) => {
   };
 };
 
-/**
- * 待修读选课表：
- *   Sheet「0」按学校《批量导入选课记录》模板，可直接导入教务；
- *   Sheet「待修读明细」保留教学进程表的模块、学分、建议开设学期，供教师核对。
- */
+// 待修读选课表：与补考表同一张《批量导入选课记录》模板，只是课程来源不同
 actions['course.exportTodo'] = async ({ user, payload }) => {
   requireTeacher(user);
 
@@ -2151,60 +2147,22 @@ actions['course.exportTodo'] = async ({ user, payload }) => {
     );
   }
 
-  const XLSX = require('xlsx');
-  const wb = XLSX.utils.book_new();
-
   // 学号尚未下发的新生，模板要求填身份证，系统里没有，留空由教师补
   const accountOf = (r) => {
     const st = students[r.studentId];
     return st && st.studentIdAssigned === false ? '' : r.studentId;
   };
 
-  const main = XLSX.utils.aoa_to_sheet([
+  const XLSX = require('xlsx');
+  const ws = XLSX.utils.aoa_to_sheet([
     [RETAKE_TEMPLATE.title],
     [RETAKE_TEMPLATE.notice],
     RETAKE_TEMPLATE.header,
     ...rows.map((r) => [r.studentName || '', accountOf(r), r.courseCode, r.courseName]),
   ]);
-  main['!cols'] = [{ wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 30 }];
-  XLSX.utils.book_append_sheet(wb, main, RETAKE_TEMPLATE.sheetName);
-
-  const detail = XLSX.utils.aoa_to_sheet([
-    [
-      '学生姓名',
-      '学生学号',
-      '一级模块',
-      '二级模块',
-      '序号',
-      '课程代码',
-      '课程名称',
-      '学分',
-      '课程类型',
-      '课程性质',
-      '建议开设学期',
-      '考试单位',
-    ],
-    ...rows.map((r) => [
-      r.studentName || '',
-      accountOf(r),
-      r.level1Module || '',
-      r.level2Module || '',
-      r.order || '',
-      r.courseCode,
-      r.courseName,
-      r.credits || '',
-      r.courseType || '',
-      r.courseNature || '',
-      r.suggestedTerm ? '第 ' + r.suggestedTerm + ' 学期' : '',
-      r.examUnit || '',
-    ]),
-  ]);
-  detail['!cols'] = [
-    { wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 14 }, { wch: 6 }, { wch: 12 },
-    { wch: 30 }, { wch: 6 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 10 },
-  ];
-  XLSX.utils.book_append_sheet(wb, detail, '待修读明细');
-
+  ws['!cols'] = [{ wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 30 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, RETAKE_TEMPLATE.sheetName);
   const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   const stamp = beijingDay().replace(/-/g, '');
   const scopeTag = payload.requiredOnly ? '统设必修' : '全部课程';

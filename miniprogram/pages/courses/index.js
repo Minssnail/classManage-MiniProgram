@@ -97,7 +97,7 @@ Page({
       const res = await api.call(
         'course.todo',
         { className: app.effectiveClassName() || undefined },
-        { loading: false }
+        { loading: false, silent: true }
       );
       this.setData({
         todo: res,
@@ -108,6 +108,7 @@ Page({
         })),
       });
     } catch (e) {
+      // 云函数还是旧版时会返回「未知的操作」，此时隐藏待修读卡片而不是报错
       this.setData({ todo: null, todoList: [] });
     }
   },
@@ -152,7 +153,7 @@ Page({
 
     const ok = await util.confirm(
       `将导出${requiredOnly ? '统设必修的' : '全部'}待修读课程，` +
-        '第一张表对齐学校的「批量导入选课记录」模板，第二张表附教学进程表明细。',
+        '格式对齐学校的「批量导入选课记录」模板，与补考表同一张表。',
       '导出待修读选课表'
     );
     if (!ok) return;
