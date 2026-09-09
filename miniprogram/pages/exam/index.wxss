@@ -222,6 +222,12 @@
   color: var(--brand);
 }
 
+.kind-sum {
+  display: flex;
+  gap: 12rpx;
+  margin-bottom: 10rpx;
+}
+
 .pending-note {
   font-size: 22rpx;
   color: var(--text-muted);

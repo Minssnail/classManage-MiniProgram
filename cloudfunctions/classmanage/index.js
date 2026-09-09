@@ -1560,6 +1560,14 @@ async function buildRuleResolver() {
     ruleOf(studentId) {
       return ruleOfStudent[studentId] || fallbackRule || null;
     },
+    // 该学生适用规则下的全部统设必修课，用于算出从未修读的补修课
+    requiredCoursesOf(studentId) {
+      const rule = this.ruleOf(studentId);
+      if (!rule || !byRule[rule]) return [];
+      return Object.values(byRule[rule]).filter(
+        (c) => c.courseType === '统设' && /^必修/.test(String(c.courseNature || ''))
+      );
+    },
     // 本规则内找不到时回退到其他规则版本，并标记来源，避免丢失学分与性质
     courseFor(studentId, code) {
       const rule = this.ruleOf(studentId);
@@ -1835,8 +1843,14 @@ actions['exam.summary'] = async ({ user, payload }) => {
 };
 
 /**
- * 待补考科目：某门课的所有考试记录里没有一次及格。
- * 补考通过后自动从名单中消失，无需人工维护。
+ * 待补考名单，两类合并：
+ *   重修 —— 考过但历次都没及格；
+ *   补修 —— 本专业规则里的统设必修课，但从未考过。
+ * 学校「批量导入选课记录」模板的说明里，补修与重修都属于该表的适用情形，
+ * 只算重修会漏掉从未选修过的必修课。
+ *
+ * 综合实践课（毕业设计、综合实践）不计入补修：它们由分部考核完成，
+ * 不通过报考补考的方式选课。
  */
 // 补考选课记录：键为「学号|课程代码」，学生自行勾选要报考哪几门
 async function retakeSelectionMap() {
@@ -1851,38 +1865,59 @@ async function retakeSelectionMap() {
   return map;
 }
 
-actions['exam.pending'] = async ({ user, payload }) => {
-  requireLogin(user);
-  const resolver = await buildRuleResolver();
+const MAKEUP_EXCLUDED_MODULE = '综合实践课';
+
+async function computePending(user, payload) {
+  const [resolver, students, selections] = await Promise.all([
+    buildRuleResolver(),
+    studentMap(),
+    retakeSelectionMap(),
+  ]);
   const records = await loadExamRecords(user, payload);
-  const students = await studentMap();
-  const selections = await retakeSelectionMap();
+
+  // 作用域内的学生：没有任何考试记录的学生也要能算出补修课
+  const scopeIds = await examScopeStudentIds(user, payload);
+  const allStudents = Object.values(students);
+  const inScope = scopeIds
+    ? allStudents.filter((s) => scopeIds.indexOf(s.studentId) >= 0)
+    : allStudents;
 
   const byKey = {};
+  const takenByStudent = {};
   for (const r of records) {
-    const k = r.studentId + '|' + r.courseCode;
-    (byKey[k] = byKey[k] || []).push(r);
+    (byKey[r.studentId + '|' + r.courseCode] = byKey[r.studentId + '|' + r.courseCode] || []).push(r);
+    (takenByStudent[r.studentId] = takenByStudent[r.studentId] || new Set()).add(r.courseCode);
   }
 
-  let pending = Object.values(byKey)
+  const decorate = (studentId, courseCode, courseName, extra) => {
+    const c = resolver.courseFor(studentId, courseCode);
+    const sel = selections[studentId + '|' + courseCode];
+    return {
+      selected: !!(sel && sel.selected),
+      selectedAt: sel && sel.selected ? sel.updatedAt : null,
+      selectedBy: sel && sel.selected ? sel.updatedBy : null,
+      studentId,
+      studentName: students[studentId] ? students[studentId].name : null,
+      courseCode,
+      courseName,
+      credits: c ? c.credits : null,
+      courseType: c ? c.courseType : null,
+      courseNature: c ? c.courseNature : null,
+      examUnit: c ? c.examUnit : null,
+      level2Module: c ? c.level2Module : null,
+      isRequired: isRequiredCourse(c),
+      ...extra,
+    };
+  };
+
+  // 重修
+  const retake = Object.values(byKey)
     .filter((group) => !group.some(isPassed))
     .map((group) => {
       const best = group.reduce((a, b) => (scoreOf(b) > scoreOf(a) ? b : a));
-      const c = resolver.courseFor(best.studentId, best.courseCode);
-      const sel = selections[best.studentId + '|' + best.courseCode];
-      return {
-        selected: !!(sel && sel.selected),
-        selectedAt: sel && sel.selected ? sel.updatedAt : null,
-        selectedBy: sel && sel.selected ? sel.updatedBy : null,
-        studentId: best.studentId,
-        studentName: students[best.studentId] ? students[best.studentId].name : null,
-        courseCode: best.courseCode,
-        courseName: best.courseName,
-        credits: c ? c.credits : null,
-        courseType: c ? c.courseType : null,
-        courseNature: c ? c.courseNature : null,
-        examUnit: c ? c.examUnit : null,
-        isRequired: isRequiredCourse(c),
+      return decorate(best.studentId, best.courseCode, best.courseName, {
+        kind: 'retake',
+        kindLabel: '重修',
         attempts: group.length,
         lastTerm: group.map((r) => r.term).sort().pop(),
         bestScore: scoreOf(best),
@@ -1890,22 +1925,57 @@ actions['exam.pending'] = async ({ user, payload }) => {
         status: best.status,
         // 要求双及格的课程终考不足 60 分即判无效，综合记 0
         dualRequired: !!best.dualRequired,
-      };
+      });
     });
 
+  // 补修
+  const makeup = [];
+  for (const st of inScope) {
+    const taken = takenByStudent[st.studentId] || new Set();
+    for (const c of resolver.requiredCoursesOf(st.studentId)) {
+      if (taken.has(c.code)) continue;
+      if (c.level2Module === MAKEUP_EXCLUDED_MODULE) continue;
+      makeup.push(
+        decorate(st.studentId, c.code, c.name, {
+          kind: 'makeup',
+          kindLabel: '补修',
+          attempts: 0,
+          lastTerm: null,
+          bestScore: null,
+          finalScore: null,
+          status: '未修',
+          dualRequired: false,
+          suggestedTerm: c.suggestedTerm,
+        })
+      );
+    }
+  }
+
+  let pending = retake.concat(makeup);
   if (payload.requiredOnly) pending = pending.filter((p) => p.isRequired);
+  if (payload.makeupOnly) pending = pending.filter((p) => p.kind === 'makeup');
+  if (payload.retakeOnly) pending = pending.filter((p) => p.kind === 'retake');
   if (payload.selectedOnly) pending = pending.filter((p) => p.selected);
+
   pending.sort(
     (a, b) =>
       (a.studentName || '').localeCompare(b.studentName || '') ||
+      (a.kind === b.kind ? 0 : a.kind === 'retake' ? -1 : 1) ||
       b.attempts - a.attempts ||
       a.courseCode.localeCompare(b.courseCode)
   );
+  return pending;
+}
 
+actions['exam.pending'] = async ({ user, payload }) => {
+  requireLogin(user);
+  const pending = await computePending(user, payload);
   return {
     pending,
     total: pending.length,
     requiredTotal: pending.filter((p) => p.isRequired).length,
+    retakeTotal: pending.filter((p) => p.kind === 'retake').length,
+    makeupTotal: pending.filter((p) => p.kind === 'makeup').length,
     pendingCredits: pending.reduce((n, p) => n + (p.credits || 0), 0),
     studentCount: new Set(pending.map((p) => p.studentId)).size,
     selectedTotal: pending.filter((p) => p.selected).length,
@@ -1931,17 +2001,27 @@ actions['retake.select'] = async ({ user, payload }) => {
     fail('只能为自己选课');
   }
 
-  // 必须确实处于待补考：已通过或没考过的课程不允许报名
+  // 必须确实待修：重修要求考过且没通过，补修要求是本专业规则内从未修读的统设必修课
   const attempts = await fetchAll(db.collection('examScores').where({ studentId, courseCode }));
-  if (!attempts.length) fail('没有该课程的考试记录，无法报名补考');
-  if (attempts.some(isPassed)) fail('该课程已通过，无需补考');
+  let courseName;
+  if (attempts.length) {
+    if (attempts.some(isPassed)) fail('该课程已通过，无需补考');
+    courseName = attempts[0].courseName;
+  } else {
+    const resolver = await buildRuleResolver();
+    const makeup = resolver
+      .requiredCoursesOf(studentId)
+      .find((c) => c.code === courseCode && c.level2Module !== MAKEUP_EXCLUDED_MODULE);
+    if (!makeup) fail('该课程不在你的待补考或补修名单中');
+    courseName = makeup.name;
+  }
 
   await ensureCollection('retakeSelections');
   const key = { studentId, courseCode };
   const existing = await db.collection('retakeSelections').where(key).limit(1).get();
   const data = {
     ...key,
-    courseName: attempts[0].courseName,
+    courseName,
     selected,
     updatedAt: new Date(),
     updatedBy: user.username,
@@ -1953,7 +2033,8 @@ actions['retake.select'] = async ({ user, payload }) => {
   }
 
   return {
-    message: selected ? '已报名补考：' + attempts[0].courseName : '已取消报名：' + attempts[0].courseName,
+    message: (selected ? '已报名补考：' : '已取消报名：') + courseName,
+    courseName,
     selected,
   };
 };
@@ -1966,12 +2047,11 @@ actions['retake.submit'] = async ({ user, payload }) => {
   if (!studentId) fail('缺少学号');
   const codes = Array.isArray(payload.courseCodes) ? payload.courseCodes.map(String) : [];
 
-  const attempts = await fetchAll(db.collection('examScores').where({ studentId }));
-  const byCourse = {};
-  for (const a of attempts) (byCourse[a.courseCode] = byCourse[a.courseCode] || []).push(a);
-  const pendingCodes = new Set(
-    Object.keys(byCourse).filter((code) => !byCourse[code].some(isPassed))
-  );
+  // 与页面上看到的名单同源，避免两处判定口径不一致
+  const list = await computePending(user, { studentId });
+  const nameByCode = {};
+  for (const p of list) nameByCode[p.courseCode] = p.courseName;
+  const pendingCodes = new Set(list.map((p) => p.courseCode));
 
   const invalid = codes.filter((c) => !pendingCodes.has(c));
   if (invalid.length) fail('以下课程不在待补考名单中：' + invalid.join('、'));
@@ -1991,7 +2071,7 @@ actions['retake.submit'] = async ({ user, payload }) => {
     const data = {
       studentId,
       courseCode: code,
-      courseName: byCourse[code][0].courseName,
+      courseName: nameByCode[code],
       selected,
       updatedAt: new Date(),
       updatedBy: user.username,
@@ -2027,46 +2107,23 @@ const RETAKE_TEMPLATE = {
 actions['exam.exportRetake'] = async ({ user, payload }) => {
   requireTeacher(user);
 
-  const resolver = await buildRuleResolver();
-  const records = await loadExamRecords(user, payload);
+  // 直接复用页面上的那份名单，避免导出与页面口径分家
   const students = await studentMap();
-  const selections = await retakeSelectionMap();
+  const pending = await computePending(user, payload);
 
-  // 与待补考名单同口径：该门课历次考试都没及格
-  const byKey = {};
-  for (const r of records) {
-    const k = r.studentId + '|' + r.courseCode;
-    (byKey[k] = byKey[k] || []).push(r);
-  }
-
-  let rows = Object.values(byKey)
-    .filter((group) => !group.some(isPassed))
-    .map((group) => {
-      const best = group.reduce((a, b) => (scoreOf(b) > scoreOf(a) ? b : a));
-      const student = students[best.studentId];
-      const course = resolver.courseFor(best.studentId, best.courseCode);
-      const sel = selections[best.studentId + '|' + best.courseCode];
-      return {
-        studentId: best.studentId,
-        studentName: student ? student.name : '',
-        // 学号尚未下发的学生，模板要求填身份证，系统里没有，留空由教师补
-        账号: student && student.studentIdAssigned === false ? '' : best.studentId,
-        courseCode: best.courseCode,
-        courseName: best.courseName,
-        isRequired: isRequiredCourse(course),
-        missingId: !!(student && student.studentIdAssigned === false),
-        selected: !!(sel && sel.selected),
-      };
-    });
-
-  if (payload.requiredOnly) rows = rows.filter((r) => r.isRequired);
-  // 学生选课版：只导出学生本人勾选报名的科目
-  if (payload.selectedOnly) rows = rows.filter((r) => r.selected);
-  rows.sort(
-    (a, b) =>
-      (a.studentName || '').localeCompare(b.studentName || '') ||
-      a.courseCode.localeCompare(b.courseCode)
-  );
+  const rows = pending.map((p) => {
+    const student = students[p.studentId];
+    return {
+      studentId: p.studentId,
+      studentName: p.studentName || '',
+      // 学号尚未下发的学生，模板要求填身份证，系统里没有，留空由教师补
+      账号: student && student.studentIdAssigned === false ? '' : p.studentId,
+      courseCode: p.courseCode,
+      courseName: p.courseName,
+      kind: p.kind,
+      missingId: !!(student && student.studentIdAssigned === false),
+    };
+  });
 
   if (!rows.length) {
     fail(

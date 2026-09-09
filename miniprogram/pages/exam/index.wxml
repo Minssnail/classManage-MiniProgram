@@ -133,8 +133,13 @@
         待补考科目
         <text class="sub">{{pending.total}} 门次 · {{pending.studentCount}} 人</text>
       </view>
+      <view class="kind-sum" wx:if="{{pending.total}}">
+        <text class="badge badge-warning">重修 {{pending.retakeTotal}}</text>
+        <text class="badge badge-muted">补修 {{pending.makeupTotal}}</text>
+      </view>
       <view class="pending-note">
-        某门课的历次考试都没有及格才计入；补考通过后会自动消失。
+        重修：考过但历次都没及格。补修：本专业统设必修课，但还没修读过。两类都要报名补考，
+        通过后自动消失。毕业设计等综合实践课由分部考核，不在此列。
         <block wx:if="{{!isTeacher}}">勾选本次要报考的科目后点「提交报名」，之后可随时修改。</block>
       </view>
 
@@ -145,7 +150,7 @@
         </view>
       </view>
 
-      <view wx:for="{{pendingList}}" wx:key="courseCode" class="list-item">
+      <view wx:for="{{pendingList}}" wx:key="rowKey" class="list-item">
         <!-- 学生端：点整行切换勾选 -->
         <view
           wx:if="{{!isTeacher}}"
@@ -158,6 +163,7 @@
         <view class="main" data-code="{{item.courseCode}}" bindtap="onTogglePick">
           <view class="title">
             <text wx:if="{{isTeacher}}">{{item.studentName}} · </text>{{item.courseName}}
+            <text class="badge {{item.kindClass}}">{{item.kindLabel}}</text>
             <text wx:if="{{item.isRequired}}" class="badge badge-brand">统设必修</text>
           </view>
           <view class="desc">
@@ -165,13 +171,17 @@
             <text wx:if="{{item.credits}}"> · {{item.credits}}学分</text>
             <text wx:if="{{item.examUnit}}"> · {{item.examUnit}}考试</text>
           </view>
-          <view class="desc">
+          <view class="desc" wx:if="{{item.kind === 'makeup'}}">
+            尚未修读
+            <text wx:if="{{item.suggestedTerm}}"> · 教学计划第 {{item.suggestedTerm}} 学期</text>
+          </view>
+          <view class="desc" wx:else>
             已考 {{item.attempts}} 次 · 最近 {{item.lastTerm}} · 最好成绩 {{item.bestScore}}
             <text wx:if="{{item.dualRequired}}" class="warn"> · 要求双及格</text>
           </view>
         </view>
         <view class="aside">
-          <text class="badge {{item.status === '无效' ? 'badge-danger' : 'badge-warning'}}">{{item.status}}</text>
+          <text class="badge {{item.statusClass}}">{{item.status}}</text>
           <!-- 教师端：显示报名状态，点一下可代学生增删 -->
           <view
             wx:if="{{isTeacher}}"

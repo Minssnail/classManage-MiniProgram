@@ -175,9 +175,16 @@ Page({
     }
   },
 
-  // WXML 里不方便判断数组包含关系，勾选状态在这里标好
+  // WXML 里不方便判断数组包含关系，勾选状态在这里标好。
+  // 教师端一屏里同一门课会出现在多个学生名下，行的键要带上学号
   decorate(list, picked) {
-    return list.map((p) => ({ ...p, isPicked: picked.indexOf(p.courseCode) >= 0 }));
+    return list.map((p) => ({
+      ...p,
+      isPicked: picked.indexOf(p.courseCode) >= 0,
+      rowKey: p.studentId + '|' + p.courseCode,
+      kindClass: p.kind === 'makeup' ? 'badge-muted' : 'badge-warning',
+      statusClass: p.status === '无效' ? 'badge-danger' : p.kind === 'makeup' ? 'badge-muted' : 'badge-warning',
+    }));
   },
 
   // 学生勾选/取消某门课，仅改本地状态
