@@ -2656,8 +2656,10 @@ const giteeTarget = {
     const query =
       '?access_token=' + encodeURIComponent(cfg.token) + '&ref=' + encodeURIComponent(cfg.branch);
 
+    // 文件不存在时 Gitee 返回的是 200 加一个空数组，不是 404，
+    // 所以按有没有 sha 判定，而不是看状态码
     const exist = await httpJson('gitee.com', 'GET', base + query, null, null);
-    const sha = exist.status === 200 && exist.body ? exist.body.sha : null;
+    const sha = exist.status === 200 && exist.body ? exist.body.sha || null : null;
 
     const body = {
       access_token: cfg.token,
@@ -2893,8 +2895,15 @@ async function handleTimer(event) {
 }
 
 exports.main = async (event) => {
-  // 定时触发器没有调用方，也没有登录态，单独一条路径处理
-  if (event && event.Type === 'timer') return handleTimer(event);
+  // 定时触发器没有调用方，也没有登录态，单独一条路径处理。
+  // 但小程序端的调用一定带 OPENID，定时触发不带——不校验的话，
+  // 任何学生构造一个 { Type: 'timer' } 就能反复触发归档。
+  if (event && event.Type === 'timer') {
+    if (cloud.getWXContext().OPENID) {
+      return { ok: false, error: '未知的操作：' + event.Type };
+    }
+    return handleTimer(event);
+  }
 
   const { action, ...payload } = event || {};
   const handler = actions[action];
