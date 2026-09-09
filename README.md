@@ -146,7 +146,9 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 系统 | `system.init`、`system.importLegacy`、`system.legacyStatus` |
 | 认证 | `auth.login`、`auth.me`、`auth.logout`、`auth.changePassword` |
 | 班级 | `class.list`、`class.create`、`class.rename`、`class.remove`、`class.setStartSemester`、`class.importRoster` |
-| 学生 | `student.list`、`student.add`、`student.assignStudentId`、`student.resetPassword` |
+| 学生 | `student.list`、`student.add`、`student.assignStudentId`、`student.resetPassword`、`student.setRule` |
+| 课程成绩 | `academic.import`、`major.list`、`course.list`、`exam.list`、`exam.summary`、`exam.pending`、`exam.exportRetake` |
+| 补考选课 | `retake.select`、`retake.submit` |
 | 积分 | `score.add`、`score.list` |
 | 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.manualCheckin`、`attendance.today` |
 | 奖励 | `reward.add`、`reward.list`、`reward.redeem`、`reward.unredeem` |

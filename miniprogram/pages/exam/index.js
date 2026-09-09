@@ -33,6 +33,10 @@ Page({
     terms: [],
     termIndex: 0,
     pending: null,
+    pendingList: [],  // 带勾选标记的待补考列表
+    picked: [],       // 学生端本地勾选状态，提交后才落库
+    dirty: false,
+    submitting: false,
     exporting: false,
     loaded: false,
   },
@@ -157,9 +161,76 @@ Page({
         { ...this.baseParams(), requiredOnly: this.data.requiredOnly },
         { loading: false }
       );
-      this.setData({ pending: res, loaded: true });
+      // 学生端把服务端的已选状态载入本地，勾选先改本地、提交时一次性落库
+      const picked = res.pending.filter((p) => p.selected).map((p) => p.courseCode);
+      this.setData({
+        pending: res,
+        picked,
+        pendingList: this.decorate(res.pending, picked),
+        dirty: false,
+        loaded: true,
+      });
     } catch (e) {
       this.setData({ loaded: true });
+    }
+  },
+
+  // WXML 里不方便判断数组包含关系，勾选状态在这里标好
+  decorate(list, picked) {
+    return list.map((p) => ({ ...p, isPicked: picked.indexOf(p.courseCode) >= 0 }));
+  },
+
+  // 学生勾选/取消某门课，仅改本地状态
+  onTogglePick(e) {
+    if (this.data.isTeacher) return;
+    const code = e.currentTarget.dataset.code;
+    const picked = this.data.picked.slice();
+    const i = picked.indexOf(code);
+    if (i >= 0) picked.splice(i, 1);
+    else picked.push(code);
+    this.setData({
+      picked,
+      pendingList: this.decorate(this.data.pending.pending, picked),
+      dirty: true,
+    });
+  },
+
+  async onSubmitPicks() {
+    if (this.data.submitting) return;
+    const count = this.data.picked.length;
+    const ok = await util.confirm(
+      count
+        ? `确认报名以下 ${count} 门补考？提交后可以再修改。`
+        : '你没有勾选任何科目，提交后将取消全部补考报名。确定吗？',
+      '提交补考报名'
+    );
+    if (!ok) return;
+
+    this.setData({ submitting: true });
+    try {
+      const res = await api.call('retake.submit', { courseCodes: this.data.picked });
+      util.toast(res.message, 'success');
+      await this.loadPending();
+    } catch (e) {
+      // 错误提示已在 api 层弹出
+    } finally {
+      this.setData({ submitting: false });
+    }
+  },
+
+  // 教师代学生勾选，直接落库
+  async onTeacherToggle(e) {
+    const { code, sid, selected } = e.currentTarget.dataset;
+    try {
+      const res = await api.call('retake.select', {
+        studentId: sid,
+        courseCode: code,
+        selected: !selected,
+      });
+      util.toast(res.message, 'success');
+      await this.loadPending();
+    } catch (err) {
+      // 错误提示已在 api 层弹出
     }
   },
 
@@ -170,8 +241,22 @@ Page({
   async onExportRetake() {
     if (this.data.exporting) return;
     const scopeText = this.data.requiredOnly ? '统设必修课' : '全部课程';
+    const selectedTotal = this.data.pending ? this.data.pending.selectedTotal : 0;
+
+    // 两种版本：学生已报名的，或全部待补考的
+    const choice = await new Promise((resolve) => {
+      wx.showActionSheet({
+        itemList: [`学生已选版（${selectedTotal} 条）`, `全部待补考版（${this.data.pending.total} 条）`],
+        success: (res) => resolve(res.tapIndex),
+        fail: () => resolve(-1),
+      });
+    });
+    if (choice < 0) return;
+    const selectedOnly = choice === 0;
+
     const ok = await util.confirm(
-      `将按「${scopeText}」口径导出待补考科目，格式对齐学校的「批量导入选课记录」模板。`,
+      `将按「${scopeText}」口径导出${selectedOnly ? '学生已报名的' : '全部待补考的'}科目，` +
+        '格式对齐学校的「批量导入选课记录」模板。',
       '导出补考选课表'
     );
     if (!ok) return;
@@ -181,7 +266,7 @@ Page({
     try {
       const res = await api.call(
         'exam.exportRetake',
-        { ...this.baseParams(), requiredOnly: this.data.requiredOnly },
+        { ...this.baseParams(), requiredOnly: this.data.requiredOnly, selectedOnly },
         { loading: false }
       );
       wx.showLoading({ title: '下载中', mask: true });

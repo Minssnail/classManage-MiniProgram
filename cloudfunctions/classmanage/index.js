@@ -26,6 +26,7 @@ const COLLECTIONS = [
   'majors',
   'courses',
   'examScores',
+  'retakeSelections',
 ];
 
 const SCORE_TYPES = ['attendance', 'homework', 'exam', 'activity', 'other'];
@@ -1837,11 +1838,25 @@ actions['exam.summary'] = async ({ user, payload }) => {
  * 待补考科目：某门课的所有考试记录里没有一次及格。
  * 补考通过后自动从名单中消失，无需人工维护。
  */
+// 补考选课记录：键为「学号|课程代码」，学生自行勾选要报考哪几门
+async function retakeSelectionMap() {
+  let rows = [];
+  try {
+    rows = await fetchAll(db.collection('retakeSelections'));
+  } catch (e) {
+    await ensureCollection('retakeSelections');
+  }
+  const map = {};
+  for (const r of rows) map[r.studentId + '|' + r.courseCode] = r;
+  return map;
+}
+
 actions['exam.pending'] = async ({ user, payload }) => {
   requireLogin(user);
   const resolver = await buildRuleResolver();
   const records = await loadExamRecords(user, payload);
   const students = await studentMap();
+  const selections = await retakeSelectionMap();
 
   const byKey = {};
   for (const r of records) {
@@ -1854,7 +1869,11 @@ actions['exam.pending'] = async ({ user, payload }) => {
     .map((group) => {
       const best = group.reduce((a, b) => (scoreOf(b) > scoreOf(a) ? b : a));
       const c = resolver.courseFor(best.studentId, best.courseCode);
+      const sel = selections[best.studentId + '|' + best.courseCode];
       return {
+        selected: !!(sel && sel.selected),
+        selectedAt: sel && sel.selected ? sel.updatedAt : null,
+        selectedBy: sel && sel.selected ? sel.updatedBy : null,
         studentId: best.studentId,
         studentName: students[best.studentId] ? students[best.studentId].name : null,
         courseCode: best.courseCode,
@@ -1875,6 +1894,7 @@ actions['exam.pending'] = async ({ user, payload }) => {
     });
 
   if (payload.requiredOnly) pending = pending.filter((p) => p.isRequired);
+  if (payload.selectedOnly) pending = pending.filter((p) => p.selected);
   pending.sort(
     (a, b) =>
       (a.studentName || '').localeCompare(b.studentName || '') ||
@@ -1888,7 +1908,103 @@ actions['exam.pending'] = async ({ user, payload }) => {
     requiredTotal: pending.filter((p) => p.isRequired).length,
     pendingCredits: pending.reduce((n, p) => n + (p.credits || 0), 0),
     studentCount: new Set(pending.map((p) => p.studentId)).size,
+    selectedTotal: pending.filter((p) => p.selected).length,
+    selectedStudentCount: new Set(pending.filter((p) => p.selected).map((p) => p.studentId)).size,
   };
+};
+
+/**
+ * 补考选课：学生勾选本学期要报考哪几门。
+ * 只能勾选自己名下、且确实处于待补考状态的课程；
+ * 教师可代任意学生勾选，便于学生不便操作时代办。
+ */
+actions['retake.select'] = async ({ user, payload }) => {
+  requireLogin(user);
+  const courseCode = String(payload.courseCode || '').trim();
+  if (!courseCode) fail('缺少课程代码');
+  const selected = payload.selected !== false;
+
+  const studentId =
+    user.role === 'student' ? user.studentId : String(payload.studentId || '').trim();
+  if (!studentId) fail('缺少学号');
+  if (user.role === 'student' && payload.studentId && payload.studentId !== user.studentId) {
+    fail('只能为自己选课');
+  }
+
+  // 必须确实处于待补考：已通过或没考过的课程不允许报名
+  const attempts = await fetchAll(db.collection('examScores').where({ studentId, courseCode }));
+  if (!attempts.length) fail('没有该课程的考试记录，无法报名补考');
+  if (attempts.some(isPassed)) fail('该课程已通过，无需补考');
+
+  await ensureCollection('retakeSelections');
+  const key = { studentId, courseCode };
+  const existing = await db.collection('retakeSelections').where(key).limit(1).get();
+  const data = {
+    ...key,
+    courseName: attempts[0].courseName,
+    selected,
+    updatedAt: new Date(),
+    updatedBy: user.username,
+  };
+  if (existing.data.length) {
+    await db.collection('retakeSelections').doc(existing.data[0]._id).update({ data });
+  } else {
+    await db.collection('retakeSelections').add({ data });
+  }
+
+  return {
+    message: selected ? '已报名补考：' + attempts[0].courseName : '已取消报名：' + attempts[0].courseName,
+    selected,
+  };
+};
+
+// 学生一次性提交本人的选课结果，避免逐门点击时反复往返
+actions['retake.submit'] = async ({ user, payload }) => {
+  requireLogin(user);
+  const studentId =
+    user.role === 'student' ? user.studentId : String(payload.studentId || '').trim();
+  if (!studentId) fail('缺少学号');
+  const codes = Array.isArray(payload.courseCodes) ? payload.courseCodes.map(String) : [];
+
+  const attempts = await fetchAll(db.collection('examScores').where({ studentId }));
+  const byCourse = {};
+  for (const a of attempts) (byCourse[a.courseCode] = byCourse[a.courseCode] || []).push(a);
+  const pendingCodes = new Set(
+    Object.keys(byCourse).filter((code) => !byCourse[code].some(isPassed))
+  );
+
+  const invalid = codes.filter((c) => !pendingCodes.has(c));
+  if (invalid.length) fail('以下课程不在待补考名单中：' + invalid.join('、'));
+
+  await ensureCollection('retakeSelections');
+  const existing = await fetchAll(db.collection('retakeSelections').where({ studentId }));
+  const existingByCode = {};
+  for (const e of existing) existingByCode[e.courseCode] = e;
+
+  const wanted = new Set(codes);
+  const writes = [];
+  // 待补考的每一门都要落一条记录：选中的置 true，未选的置 false
+  for (const code of pendingCodes) {
+    const selected = wanted.has(code);
+    const prev = existingByCode[code];
+    if (prev && !!prev.selected === selected) continue;
+    const data = {
+      studentId,
+      courseCode: code,
+      courseName: byCourse[code][0].courseName,
+      selected,
+      updatedAt: new Date(),
+      updatedBy: user.username,
+    };
+    writes.push(
+      prev
+        ? db.collection('retakeSelections').doc(prev._id).update({ data })
+        : db.collection('retakeSelections').add({ data })
+    );
+  }
+  await Promise.all(writes);
+
+  return { message: `已提交 ${codes.length} 门补考报名`, selectedCount: codes.length };
 };
 
 /**
@@ -1914,6 +2030,7 @@ actions['exam.exportRetake'] = async ({ user, payload }) => {
   const resolver = await buildRuleResolver();
   const records = await loadExamRecords(user, payload);
   const students = await studentMap();
+  const selections = await retakeSelectionMap();
 
   // 与待补考名单同口径：该门课历次考试都没及格
   const byKey = {};
@@ -1928,6 +2045,7 @@ actions['exam.exportRetake'] = async ({ user, payload }) => {
       const best = group.reduce((a, b) => (scoreOf(b) > scoreOf(a) ? b : a));
       const student = students[best.studentId];
       const course = resolver.courseFor(best.studentId, best.courseCode);
+      const sel = selections[best.studentId + '|' + best.courseCode];
       return {
         studentId: best.studentId,
         studentName: student ? student.name : '',
@@ -1937,17 +2055,26 @@ actions['exam.exportRetake'] = async ({ user, payload }) => {
         courseName: best.courseName,
         isRequired: isRequiredCourse(course),
         missingId: !!(student && student.studentIdAssigned === false),
+        selected: !!(sel && sel.selected),
       };
     });
 
   if (payload.requiredOnly) rows = rows.filter((r) => r.isRequired);
+  // 学生选课版：只导出学生本人勾选报名的科目
+  if (payload.selectedOnly) rows = rows.filter((r) => r.selected);
   rows.sort(
     (a, b) =>
       (a.studentName || '').localeCompare(b.studentName || '') ||
       a.courseCode.localeCompare(b.courseCode)
   );
 
-  if (!rows.length) fail('当前筛选条件下没有待补考科目，无需导出');
+  if (!rows.length) {
+    fail(
+      payload.selectedOnly
+        ? '还没有学生报名补考，无法导出选课版。可让学生在「成绩查询 → 待补考」里勾选，或改导全部待补考科目'
+        : '当前筛选条件下没有待补考科目，无需导出'
+    );
+  }
 
   const XLSX = require('xlsx');
   const aoa = [
@@ -1963,7 +2090,8 @@ actions['exam.exportRetake'] = async ({ user, payload }) => {
   const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
   const stamp = beijingDay().replace(/-/g, '');
-  const scopeTag = payload.requiredOnly ? '统设必修' : '全部课程';
+  const scopeTag =
+    (payload.selectedOnly ? '学生已选' : '全部待补考') + '-' + (payload.requiredOnly ? '统设必修' : '全部课程');
   const className = (await resolveClassName(user, payload)) || '全部班级';
   const cloudPath = `retake/${stamp}-${className}-${scopeTag}-${Date.now()}.xlsx`;
   const upload = await cloud.uploadFile({ cloudPath, fileContent: buffer });
@@ -1975,6 +2103,7 @@ actions['exam.exportRetake'] = async ({ user, payload }) => {
     rowCount: rows.length,
     studentCount: new Set(rows.map((r) => r.studentId)).size,
     scope: scopeTag,
+    selectedOnly: !!payload.selectedOnly,
     className,
     // 模板要求新生填身份证，系统里没有该字段，这些行的学号留空需教师补齐
     missingStudentId: missing.map((r) => r.studentName),

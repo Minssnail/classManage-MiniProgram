@@ -135,17 +135,27 @@
       </view>
       <view class="pending-note">
         某门课的历次考试都没有及格才计入；补考通过后会自动消失。
+        <block wx:if="{{!isTeacher}}">勾选本次要报考的科目后点「提交报名」，之后可随时修改。</block>
       </view>
-      <button
-        wx:if="{{isTeacher && pending.total}}"
-        class="btn btn-ghost export-btn"
-        loading="{{exporting}}"
-        bindtap="onExportRetake"
-      >
-        导出补考选课表
-      </button>
-      <view wx:for="{{pending.pending}}" wx:key="courseCode" class="list-item">
-        <view class="main">
+
+      <view class="select-bar" wx:if="{{isTeacher && pending.total}}">
+        <text>已报名 {{pending.selectedTotal}} 门 · {{pending.selectedStudentCount}} 人</text>
+        <view class="btn btn-ghost btn-sm" loading="{{exporting}}" bindtap="onExportRetake">
+          导出选课表
+        </view>
+      </view>
+
+      <view wx:for="{{pendingList}}" wx:key="courseCode" class="list-item">
+        <!-- 学生端：点整行切换勾选 -->
+        <view
+          wx:if="{{!isTeacher}}"
+          class="pick-box {{item.isPicked ? 'on' : ''}}"
+          data-code="{{item.courseCode}}"
+          bindtap="onTogglePick"
+        >
+          <text wx:if="{{item.isPicked}}">✓</text>
+        </view>
+        <view class="main" data-code="{{item.courseCode}}" bindtap="onTogglePick">
           <view class="title">
             <text wx:if="{{isTeacher}}">{{item.studentName}} · </text>{{item.courseName}}
             <text wx:if="{{item.isRequired}}" class="badge badge-brand">统设必修</text>
@@ -162,9 +172,31 @@
         </view>
         <view class="aside">
           <text class="badge {{item.status === '无效' ? 'badge-danger' : 'badge-warning'}}">{{item.status}}</text>
+          <!-- 教师端：显示报名状态，点一下可代学生增删 -->
+          <view
+            wx:if="{{isTeacher}}"
+            class="btn btn-sm {{item.selected ? 'btn-ghost' : 'btn-plain'}} enroll-btn"
+            data-code="{{item.courseCode}}"
+            data-sid="{{item.studentId}}"
+            data-selected="{{item.selected}}"
+            bindtap="onTeacherToggle"
+          >
+            {{item.selected ? '已报名' : '未报名'}}
+          </view>
         </view>
       </view>
       <view wx:if="{{loaded && !pending.total}}" class="empty">没有待补考科目</view>
+
+      <!-- 学生端提交条 -->
+      <view class="submit-bar" wx:if="{{!isTeacher && pending.total}}">
+        <view class="submit-count">
+          已勾选 <text class="num">{{picked.length}}</text> / {{pending.total}} 门
+          <text wx:if="{{dirty}}" class="dirty-tag">未提交</text>
+        </view>
+        <button class="btn btn-primary btn-sm" loading="{{submitting}}" bindtap="onSubmitPicks">
+          提交报名
+        </button>
+      </view>
     </view>
   </block>
 </view>

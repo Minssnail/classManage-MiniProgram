@@ -232,3 +232,69 @@
 .export-btn {
   margin-bottom: 16rpx;
 }
+
+/* 补考选课 */
+.pick-box {
+  width: 40rpx;
+  height: 40rpx;
+  border: 2rpx solid #c7cedb;
+  border-radius: 10rpx;
+  margin-right: 20rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  color: #fff;
+  background: #fff;
+}
+
+.pick-box.on {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f7f8fb;
+  border-radius: 12rpx;
+  padding: 16rpx 20rpx;
+  font-size: 24rpx;
+  color: var(--text-muted);
+  margin-bottom: 12rpx;
+}
+
+.enroll-btn {
+  margin-top: 12rpx;
+}
+
+.submit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 24rpx;
+  padding-top: 24rpx;
+  border-top: 2rpx solid var(--border);
+}
+
+.submit-count {
+  font-size: 25rpx;
+  color: var(--text-muted);
+}
+
+.submit-count .num {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.dirty-tag {
+  font-size: 21rpx;
+  color: var(--warning);
+  background: var(--warning-light);
+  padding: 2rpx 14rpx;
+  border-radius: 999rpx;
+  margin-left: 12rpx;
+}
