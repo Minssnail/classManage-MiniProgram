@@ -1560,14 +1560,6 @@ async function buildRuleResolver() {
     ruleOf(studentId) {
       return ruleOfStudent[studentId] || fallbackRule || null;
     },
-    // 该学生适用规则下的全部统设必修课，用于算出从未修读的补修课
-    requiredCoursesOf(studentId) {
-      const rule = this.ruleOf(studentId);
-      if (!rule || !byRule[rule]) return [];
-      return Object.values(byRule[rule]).filter(
-        (c) => c.courseType === '统设' && /^必修/.test(String(c.courseNature || ''))
-      );
-    },
     // 本规则内找不到时回退到其他规则版本，并标记来源，避免丢失学分与性质
     courseFor(studentId, code) {
       const rule = this.ruleOf(studentId);
@@ -1842,16 +1834,6 @@ actions['exam.summary'] = async ({ user, payload }) => {
   };
 };
 
-/**
- * 待补考名单，两类合并：
- *   重修 —— 考过但历次都没及格；
- *   补修 —— 本专业规则里的统设必修课，但从未考过。
- * 学校「批量导入选课记录」模板的说明里，补修与重修都属于该表的适用情形，
- * 只算重修会漏掉从未选修过的必修课。
- *
- * 综合实践课（毕业设计、综合实践）不计入补修：它们由分部考核完成，
- * 不通过报考补考的方式选课。
- */
 // 补考选课记录：键为「学号|课程代码」，学生自行勾选要报考哪几门
 async function retakeSelectionMap() {
   let rows = [];
@@ -1865,8 +1847,11 @@ async function retakeSelectionMap() {
   return map;
 }
 
-const MAKEUP_EXCLUDED_MODULE = '综合实践课';
-
+/**
+ * 待补考名单：某门课历次考试都没及格就计入，无论必修还是选修——
+ * 挂掉的选修课同样要重修，因此这里不套用平均分那套「统设必修」口径。
+ * requiredOnly 仅在调用方明确要求时才收窄。
+ */
 async function computePending(user, payload) {
   const [resolver, students, selections] = await Promise.all([
     buildRuleResolver(),
@@ -1875,18 +1860,9 @@ async function computePending(user, payload) {
   ]);
   const records = await loadExamRecords(user, payload);
 
-  // 作用域内的学生：没有任何考试记录的学生也要能算出补修课
-  const scopeIds = await examScopeStudentIds(user, payload);
-  const allStudents = Object.values(students);
-  const inScope = scopeIds
-    ? allStudents.filter((s) => scopeIds.indexOf(s.studentId) >= 0)
-    : allStudents;
-
   const byKey = {};
-  const takenByStudent = {};
   for (const r of records) {
     (byKey[r.studentId + '|' + r.courseCode] = byKey[r.studentId + '|' + r.courseCode] || []).push(r);
-    (takenByStudent[r.studentId] = takenByStudent[r.studentId] || new Set()).add(r.courseCode);
   }
 
   const decorate = (studentId, courseCode, courseName, extra) => {
@@ -1910,14 +1886,11 @@ async function computePending(user, payload) {
     };
   };
 
-  // 重修
-  const retake = Object.values(byKey)
+  let pending = Object.values(byKey)
     .filter((group) => !group.some(isPassed))
     .map((group) => {
       const best = group.reduce((a, b) => (scoreOf(b) > scoreOf(a) ? b : a));
       return decorate(best.studentId, best.courseCode, best.courseName, {
-        kind: 'retake',
-        kindLabel: '重修',
         attempts: group.length,
         lastTerm: group.map((r) => r.term).sort().pop(),
         bestScore: scoreOf(best),
@@ -1928,39 +1901,12 @@ async function computePending(user, payload) {
       });
     });
 
-  // 补修
-  const makeup = [];
-  for (const st of inScope) {
-    const taken = takenByStudent[st.studentId] || new Set();
-    for (const c of resolver.requiredCoursesOf(st.studentId)) {
-      if (taken.has(c.code)) continue;
-      if (c.level2Module === MAKEUP_EXCLUDED_MODULE) continue;
-      makeup.push(
-        decorate(st.studentId, c.code, c.name, {
-          kind: 'makeup',
-          kindLabel: '补修',
-          attempts: 0,
-          lastTerm: null,
-          bestScore: null,
-          finalScore: null,
-          status: '未修',
-          dualRequired: false,
-          suggestedTerm: c.suggestedTerm,
-        })
-      );
-    }
-  }
-
-  let pending = retake.concat(makeup);
   if (payload.requiredOnly) pending = pending.filter((p) => p.isRequired);
-  if (payload.makeupOnly) pending = pending.filter((p) => p.kind === 'makeup');
-  if (payload.retakeOnly) pending = pending.filter((p) => p.kind === 'retake');
   if (payload.selectedOnly) pending = pending.filter((p) => p.selected);
 
   pending.sort(
     (a, b) =>
       (a.studentName || '').localeCompare(b.studentName || '') ||
-      (a.kind === b.kind ? 0 : a.kind === 'retake' ? -1 : 1) ||
       b.attempts - a.attempts ||
       a.courseCode.localeCompare(b.courseCode)
   );
@@ -1974,8 +1920,6 @@ actions['exam.pending'] = async ({ user, payload }) => {
     pending,
     total: pending.length,
     requiredTotal: pending.filter((p) => p.isRequired).length,
-    retakeTotal: pending.filter((p) => p.kind === 'retake').length,
-    makeupTotal: pending.filter((p) => p.kind === 'makeup').length,
     pendingCredits: pending.reduce((n, p) => n + (p.credits || 0), 0),
     studentCount: new Set(pending.map((p) => p.studentId)).size,
     selectedTotal: pending.filter((p) => p.selected).length,
@@ -2001,20 +1945,11 @@ actions['retake.select'] = async ({ user, payload }) => {
     fail('只能为自己选课');
   }
 
-  // 必须确实待修：重修要求考过且没通过，补修要求是本专业规则内从未修读的统设必修课
+  // 必须确实待补考：考过、且历次都没通过
   const attempts = await fetchAll(db.collection('examScores').where({ studentId, courseCode }));
-  let courseName;
-  if (attempts.length) {
-    if (attempts.some(isPassed)) fail('该课程已通过，无需补考');
-    courseName = attempts[0].courseName;
-  } else {
-    const resolver = await buildRuleResolver();
-    const makeup = resolver
-      .requiredCoursesOf(studentId)
-      .find((c) => c.code === courseCode && c.level2Module !== MAKEUP_EXCLUDED_MODULE);
-    if (!makeup) fail('该课程不在你的待补考或补修名单中');
-    courseName = makeup.name;
-  }
+  if (!attempts.length) fail('没有该课程的考试记录，无法报名补考');
+  if (attempts.some(isPassed)) fail('该课程已通过，无需补考');
+  const courseName = attempts[0].courseName;
 
   await ensureCollection('retakeSelections');
   const key = { studentId, courseCode };
@@ -2120,7 +2055,6 @@ actions['exam.exportRetake'] = async ({ user, payload }) => {
       账号: student && student.studentIdAssigned === false ? '' : p.studentId,
       courseCode: p.courseCode,
       courseName: p.courseName,
-      kind: p.kind,
       missingId: !!(student && student.studentIdAssigned === false),
     };
   });
@@ -2147,8 +2081,9 @@ actions['exam.exportRetake'] = async ({ user, payload }) => {
   const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
   const stamp = beijingDay().replace(/-/g, '');
+  // 默认导全部待补考科目，只在调用方明确收窄到统设必修时才在文件名里标出来
   const scopeTag =
-    (payload.selectedOnly ? '学生已选' : '全部待补考') + '-' + (payload.requiredOnly ? '统设必修' : '全部课程');
+    (payload.selectedOnly ? '学生已选' : '全部待补考') + (payload.requiredOnly ? '-统设必修' : '');
   const className = (await resolveClassName(user, payload)) || '全部班级';
   const cloudPath = `retake/${stamp}-${className}-${scopeTag}-${Date.now()}.xlsx`;
   const upload = await cloud.uploadFile({ cloudPath, fileContent: buffer });

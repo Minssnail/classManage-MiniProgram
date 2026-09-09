@@ -156,11 +156,9 @@ Page({
 
   async loadPending() {
     try {
-      const res = await api.call(
-        'exam.pending',
-        { ...this.baseParams(), requiredOnly: this.data.requiredOnly },
-        { loading: false }
-      );
+      // 不带 requiredOnly：平均分要分统设必修/全部两种口径，待补考不分，
+      // 选修课挂了同样要重修
+      const res = await api.call('exam.pending', this.baseParams(), { loading: false });
       // 学生端把服务端的已选状态载入本地，勾选先改本地、提交时一次性落库
       const picked = res.pending.filter((p) => p.selected).map((p) => p.courseCode);
       this.setData({
@@ -182,8 +180,7 @@ Page({
       ...p,
       isPicked: picked.indexOf(p.courseCode) >= 0,
       rowKey: p.studentId + '|' + p.courseCode,
-      kindClass: p.kind === 'makeup' ? 'badge-muted' : 'badge-warning',
-      statusClass: p.status === '无效' ? 'badge-danger' : p.kind === 'makeup' ? 'badge-muted' : 'badge-warning',
+      statusClass: p.status === '无效' ? 'badge-danger' : 'badge-warning',
     }));
   },
 
@@ -247,7 +244,6 @@ Page({
    */
   async onExportRetake() {
     if (this.data.exporting) return;
-    const scopeText = this.data.requiredOnly ? '统设必修课' : '全部课程';
     const selectedTotal = this.data.pending ? this.data.pending.selectedTotal : 0;
 
     // 两种版本：学生已报名的，或全部待补考的
@@ -262,7 +258,7 @@ Page({
     const selectedOnly = choice === 0;
 
     const ok = await util.confirm(
-      `将按「${scopeText}」口径导出${selectedOnly ? '学生已报名的' : '全部待补考的'}科目，` +
+      `将导出${selectedOnly ? '学生已报名的' : '全部待补考的'}科目（必修选修都含），` +
         '格式对齐学校的「批量导入选课记录」模板。',
       '导出补考选课表'
     );
@@ -271,9 +267,10 @@ Page({
     this.setData({ exporting: true });
     wx.showLoading({ title: '生成中', mask: true });
     try {
+      // 与页面上的待补考名单同源，同样不套用统设必修口径
       const res = await api.call(
         'exam.exportRetake',
-        { ...this.baseParams(), requiredOnly: this.data.requiredOnly, selectedOnly },
+        { ...this.baseParams(), selectedOnly },
         { loading: false }
       );
       wx.showLoading({ title: '下载中', mask: true });
