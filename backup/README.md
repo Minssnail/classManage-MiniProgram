@@ -11,35 +11,51 @@ backup/
 ## 一、每周自动归档（推荐）
 
 云函数带一个定时触发器 `weeklyRankingSnapshot`，**每周一 03:00（北京时间）**自动跑一次：
-直接读数据库算出排行榜，脱敏成 Markdown，再通过 Gitee OpenAPI 提交到
-`backup/ranking/YYYY-MM-DD.md`。云函数里没有 git，走的是仓库文件接口，不需要本机开着。
+直接读数据库算出排行榜，脱敏成 Markdown，同时提交到 **微信 Git 与 Gitee 两处**的
+`backup/ranking/YYYY-MM-DD.md`。云函数里没有 git，走的是各自的仓库文件接口，不需要本机开着。
 
-同一份内容也会存进云存储 `ranking-snapshot/`，Gitee 那边万一出问题也不至于这周白跑。
+| 落点 | 接口 | 认证 |
+| --- | --- | --- |
+| 微信 Git（git.weixin.qq.com） | GitLab v3 `/api/v3/projects/:id/repository/files` | `PRIVATE-TOKEN` 请求头 |
+| Gitee | OpenAPI v5 `/api/v5/repos/:owner/:repo/contents/:path` | `access_token` 参数 |
+| 云开发存储 `ranking-snapshot/` | — | — |
+
+**一处失败不影响另一处**：某个令牌过期时，另一处仍然拿得到这周的数据。云存储那份始终会写，
+两个仓库都不通也不至于整周白跑。
 
 ### 配置
 
-Gitee 令牌不能写进代码，放在云函数的环境变量里：
+令牌不能写进代码，放在云函数的环境变量里：
 云开发控制台 → 云函数 → `classmanage` → 版本与配置 → 环境变量。
 
 | 变量 | 必需 | 说明 |
 | --- | --- | --- |
-| `GITEE_TOKEN` | 是 | Gitee 私人令牌，[设置 → 私人令牌](https://gitee.com/profile/personal_access_tokens) 生成，勾选 `projects` 权限 |
-| `GITEE_OWNER` | 是 | 仓库拥有者，如 `minssnail` |
-| `GITEE_REPO` | 是 | 仓库名，如 `class-manage-mini-program` |
+| `WXGIT_TOKEN` | 微信 Git 必需 | 微信代码管理的访问令牌，需要仓库写权限 |
+| `WXGIT_PROJECT` | 微信 Git 必需 | `命名空间/仓库名`，如 `minschan/classManage` |
+| `WXGIT_BRANCH` | 否 | 默认 `master` |
+| `WXGIT_HOST` | 否 | 默认 `git.weixin.qq.com` |
+| `GITEE_TOKEN` | Gitee 必需 | Gitee 私人令牌，[设置 → 私人令牌](https://gitee.com/profile/personal_access_tokens) 生成，勾选 `projects` 权限 |
+| `GITEE_OWNER` | Gitee 必需 | 仓库拥有者，如 `minssnail` |
+| `GITEE_REPO` | Gitee 必需 | 仓库名，如 `class-manage-mini-program` |
 | `GITEE_BRANCH` | 否 | 默认 `master` |
 
-三个必需变量缺任意一个就只写云存储、不推 Gitee，并在返回里说明原因——不会静默失败。
+两组变量互相独立，只配一组就只推那一处，另一处标记为「已跳过」并说明缺哪个变量——不会静默失败。
+
+> 云函数超时时间要调到 **60 秒**（同一个配置页）。默认的 3 秒不够：要读整个 `scoreRecords`
+> 集合、写云存储，再加两个远端各两次 HTTPS 往返。config.json 里的 `timeout` 不会被 CLI 应用，
+> 必须在控制台改。
 
 ### 验证与排查
 
-云函数测试面板传 `{"action": "snapshot.run"}`（需教师登录态）可立即跑一次，
-返回里能看到文件路径、学生数、记录数和 Gitee 的提交结果。
-`{"action": "snapshot.status"}` 查看配置是否齐备与最近 10 次归档记录。
+云函数测试面板传 `{"action": "snapshot.run"}`（需教师登录态）可立即跑一次，返回里有
+文件路径、学生数、记录数，以及 `targets` 数组——两个远端各自的推送结果、文件地址或错误原文。
+`{"action": "snapshot.status"}` 查看两处配置是否齐备与最近 10 次归档记录。
 
-定时触发没有调用方能看返回值，因此每次跑完都会往 `snapshotLogs` 集合写一条日志，
-成功失败都记，失败还带上错误原文。
+定时触发没有调用方能看返回值，因此每次跑完都会往 `snapshotLogs` 集合写一条日志。
+只要有一处推失败就记 `ok: false`（这样令牌失效能被发现），但日志里保留 `targets`，
+仍看得出另一处其实成功了。
 
-> 令牌有有效期，过期后定时任务会连续失败。`snapshot.status` 的最近记录里能一眼看到。
+> 令牌有有效期，过期后定时任务会连续失败。`snapshot.status` 的最近记录里能一眼看到是哪一处。
 
 ## 二、手工快照（本机）
 

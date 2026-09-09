@@ -2583,25 +2583,17 @@ function buildSnapshotMarkdown(students, records, semesters, stamp) {
   return { markdown: lines.join('\n'), classCount: classes.length, sections };
 }
 
-// Gitee OpenAPI：云函数里没有 git，直接调「仓库文件」接口提交
-function giteeConfig() {
-  const env = process.env;
-  return {
-    token: env.GITEE_TOKEN || '',
-    owner: env.GITEE_OWNER || '',
-    repo: env.GITEE_REPO || '',
-    branch: env.GITEE_BRANCH || 'master',
-  };
-}
-
-function giteeRequest(method, path, body) {
+/**
+ * 通用的 HTTPS JSON 请求。云函数里没有 git，两个远端都走各自的「仓库文件」接口提交。
+ */
+function httpJson(host, method, path, headers, body) {
   const https = require('https');
   const payload = body ? JSON.stringify(body) : null;
   const options = {
-    hostname: 'gitee.com',
+    hostname: host,
     path,
     method,
-    headers: { Accept: 'application/json' },
+    headers: Object.assign({ Accept: 'application/json' }, headers || {}),
     timeout: 15000,
   };
   if (payload) {
@@ -2623,44 +2615,158 @@ function giteeRequest(method, path, body) {
         resolve({ status: res.statusCode, body: json, text });
       });
     });
-    req.on('timeout', () => req.destroy(new Error('请求 Gitee 超时')));
+    req.on('timeout', () => req.destroy(new Error('请求超时：' + host)));
     req.on('error', reject);
     if (payload) req.write(payload);
     req.end();
   });
 }
 
-/**
- * 写入（或覆盖）仓库里的一个文件。
- * Gitee 的更新接口要带上文件当前的 sha，所以先查一次：不存在就 POST 新建，存在就 PUT 覆盖。
- */
-async function giteePutFile(cfg, filePath, content, message) {
-  const base = '/api/v5/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + filePath;
-  const query =
-    '?access_token=' + encodeURIComponent(cfg.token) + '&ref=' + encodeURIComponent(cfg.branch);
-
-  const exist = await giteeRequest('GET', base + query);
-  const sha = exist.status === 200 && exist.body ? exist.body.sha : null;
-
-  const body = {
-    access_token: cfg.token,
-    content: Buffer.from(content, 'utf8').toString('base64'),
-    message,
-    branch: cfg.branch,
-  };
-  if (sha) body.sha = sha;
-
-  const res = await giteeRequest(sha ? 'PUT' : 'POST', base, body);
-  if (res.status >= 200 && res.status < 300) {
-    return { updated: !!sha, url: res.body && res.body.content ? res.body.content.html_url : null };
-  }
-  const detail = res.body && res.body.message ? res.body.message : res.text.slice(0, 200);
-  fail('提交到 Gitee 失败（HTTP ' + res.status + '）：' + detail);
+function errDetail(res) {
+  if (res.body && res.body.message) return String(res.body.message);
+  if (res.body && res.body.error) return String(res.body.error);
+  return String(res.text || '').slice(0, 200);
 }
 
 /**
- * 生成快照并归档。Gitee 没配好也要照样把文件留在云存储里，
- * 否则一个令牌过期就等于这一周的备份彻底没了。
+ * Gitee（OpenAPI v5）。更新接口要带文件当前的 sha，
+ * 所以先查一次：不存在就 POST 新建，存在就 PUT 覆盖。
+ */
+const giteeTarget = {
+  name: 'gitee',
+  label: 'Gitee',
+  config() {
+    const env = process.env;
+    return {
+      token: env.GITEE_TOKEN || '',
+      owner: env.GITEE_OWNER || '',
+      repo: env.GITEE_REPO || '',
+      branch: env.GITEE_BRANCH || 'master',
+    };
+  },
+  ready(cfg) {
+    return !!(cfg.token && cfg.owner && cfg.repo);
+  },
+  missing: '未配置 GITEE_TOKEN / GITEE_OWNER / GITEE_REPO',
+  describe(cfg) {
+    return cfg.owner && cfg.repo ? cfg.owner + '/' + cfg.repo : null;
+  },
+  async put(cfg, filePath, content, message) {
+    const base = '/api/v5/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + filePath;
+    const query =
+      '?access_token=' + encodeURIComponent(cfg.token) + '&ref=' + encodeURIComponent(cfg.branch);
+
+    const exist = await httpJson('gitee.com', 'GET', base + query, null, null);
+    const sha = exist.status === 200 && exist.body ? exist.body.sha : null;
+
+    const body = {
+      access_token: cfg.token,
+      content: Buffer.from(content, 'utf8').toString('base64'),
+      message,
+      branch: cfg.branch,
+    };
+    if (sha) body.sha = sha;
+
+    const res = await httpJson('gitee.com', sha ? 'PUT' : 'POST', base, null, body);
+    if (res.status >= 200 && res.status < 300) {
+      return {
+        updated: !!sha,
+        url: res.body && res.body.content ? res.body.content.html_url : null,
+      };
+    }
+    fail('提交到 Gitee 失败（HTTP ' + res.status + '）：' + errDetail(res));
+  },
+};
+
+/**
+ * 微信代码管理（git.weixin.qq.com）。它是 GitLab 风格的 v3 接口，
+ * 用 PRIVATE-TOKEN 认证，靠 POST / PUT 区分新建与覆盖，不需要 sha。
+ */
+const wxgitTarget = {
+  name: 'wxgit',
+  label: '微信 Git',
+  config() {
+    const env = process.env;
+    return {
+      token: env.WXGIT_TOKEN || '',
+      project: env.WXGIT_PROJECT || '',
+      branch: env.WXGIT_BRANCH || 'master',
+      host: env.WXGIT_HOST || 'git.weixin.qq.com',
+    };
+  },
+  ready(cfg) {
+    return !!(cfg.token && cfg.project);
+  },
+  missing: '未配置 WXGIT_TOKEN / WXGIT_PROJECT',
+  describe(cfg) {
+    return cfg.project || null;
+  },
+  async put(cfg, filePath, content, message) {
+    // 项目标识是「命名空间/仓库名」，斜杠要整体编码
+    const base = '/api/v3/projects/' + encodeURIComponent(cfg.project) + '/repository/files';
+    const headers = { 'PRIVATE-TOKEN': cfg.token };
+    const query =
+      '?file_path=' + encodeURIComponent(filePath) + '&ref=' + encodeURIComponent(cfg.branch);
+
+    const exist = await httpJson(cfg.host, 'GET', base + query, headers, null);
+    // 401/403 是令牌的问题，当成「文件不存在」去新建只会得到一个更含糊的报错
+    if (exist.status === 401 || exist.status === 403) {
+      fail('访问微信 Git 失败（HTTP ' + exist.status + '）：' + errDetail(exist));
+    }
+    const exists = exist.status === 200;
+
+    const body = {
+      file_path: filePath,
+      branch_name: cfg.branch,
+      encoding: 'base64',
+      content: Buffer.from(content, 'utf8').toString('base64'),
+      commit_message: message,
+    };
+
+    const res = await httpJson(cfg.host, exists ? 'PUT' : 'POST', base, headers, body);
+    if (res.status >= 200 && res.status < 300) {
+      return {
+        updated: exists,
+        url: 'https://' + cfg.host + '/' + cfg.project + '/blob/' + cfg.branch + '/' + filePath,
+      };
+    }
+    fail('提交到微信 Git 失败（HTTP ' + res.status + '）：' + errDetail(res));
+  },
+};
+
+const SNAPSHOT_TARGETS = [wxgitTarget, giteeTarget];
+
+/**
+ * 逐个远端推送。一个失败不影响另一个——两处归档的意义就在于此，
+ * 某个令牌过期时另一处仍然拿得到这一周的数据。
+ */
+async function pushSnapshot(filePath, content, message) {
+  const results = [];
+  for (const target of SNAPSHOT_TARGETS) {
+    const cfg = target.config();
+    const row = { name: target.name, label: target.label, repo: target.describe(cfg), branch: cfg.branch };
+    if (!target.ready(cfg)) {
+      results.push({ ...row, pushed: false, skipped: true, reason: target.missing });
+      continue;
+    }
+    try {
+      const out = await target.put(cfg, filePath, content, message);
+      results.push({ ...row, pushed: true, skipped: false, ...out });
+    } catch (err) {
+      results.push({
+        ...row,
+        pushed: false,
+        skipped: false,
+        error: err && err.message ? err.message : String(err),
+      });
+    }
+  }
+  return results;
+}
+
+/**
+ * 生成快照并归档到微信 Git 与 Gitee 两处。
+ * 两边都没配好也要照样把文件留在云存储里，否则令牌一过期就等于这周的备份彻底没了。
  */
 async function runSnapshot(trigger) {
   const [students, records, semesters] = await Promise.all([
@@ -2673,13 +2779,17 @@ async function runSnapshot(trigger) {
   const built = buildSnapshotMarkdown(students, records, semesters, stamp);
   const filePath = SNAPSHOT_DIR + '/' + stamp + '.md';
 
-  // 云存储始终留一份，作为 Gitee 之外的第二个落点
+  // 云存储始终留一份，作为两个仓库之外的兜底落点
   const upload = await cloud.uploadFile({
     cloudPath: 'ranking-snapshot/' + stamp + '.md',
     fileContent: Buffer.from(built.markdown, 'utf8'),
   });
 
-  const result = {
+  const message =
+    '积分排行榜快照 ' + stamp + '（' + (trigger === 'timer' ? '定时归档' : '手动归档') + '）';
+  const targets = await pushSnapshot(filePath, built.markdown, message);
+
+  return {
     day: stamp,
     filePath,
     fileID: upload.fileID,
@@ -2688,26 +2798,11 @@ async function runSnapshot(trigger) {
     classCount: built.classCount,
     sections: built.sections,
     trigger: trigger || 'manual',
-    gitee: null,
+    targets,
+    pushedCount: targets.filter((t) => t.pushed).length,
+    failedCount: targets.filter((t) => !t.pushed && !t.skipped).length,
+    skippedCount: targets.filter((t) => t.skipped).length,
   };
-
-  const cfg = giteeConfig();
-  if (!cfg.token || !cfg.owner || !cfg.repo) {
-    result.gitee = {
-      pushed: false,
-      reason: '未配置 Gitee 环境变量（GITEE_TOKEN / GITEE_OWNER / GITEE_REPO），已只存云存储',
-    };
-    return result;
-  }
-
-  const pushed = await giteePutFile(
-    cfg,
-    filePath,
-    built.markdown,
-    '积分排行榜快照 ' + stamp + '（' + (trigger === 'timer' ? '定时归档' : '手动归档') + '）'
-  );
-  result.gitee = { pushed: true, ...pushed, repo: cfg.owner + '/' + cfg.repo, branch: cfg.branch };
-  return result;
 }
 
 // 教师手动归档一次，便于配好令牌后当场验证
@@ -2719,29 +2814,43 @@ actions['snapshot.run'] = async ({ user }) => {
 // 只看配置是否齐备与上次归档情况，不产生新文件
 actions['snapshot.status'] = async ({ user }) => {
   requireTeacher(user);
-  const cfg = giteeConfig();
+
+  const targets = SNAPSHOT_TARGETS.map((t) => {
+    const cfg = t.config();
+    return {
+      name: t.name,
+      label: t.label,
+      configured: t.ready(cfg),
+      repo: t.describe(cfg),
+      branch: cfg.branch,
+      missing: t.ready(cfg) ? null : t.missing,
+    };
+  });
+
   let recent = [];
   try {
-    const res = await db
-      .collection('snapshotLogs')
-      .orderBy('createdAt', 'desc')
-      .limit(10)
-      .get();
+    const res = await db.collection('snapshotLogs').orderBy('createdAt', 'desc').limit(10).get();
     recent = res.data || [];
   } catch (e) {
     recent = [];
   }
+
   return {
-    configured: !!(cfg.token && cfg.owner && cfg.repo),
-    repo: cfg.owner && cfg.repo ? cfg.owner + '/' + cfg.repo : null,
-    branch: cfg.branch,
+    targets,
+    configured: targets.some((t) => t.configured),
     dir: SNAPSHOT_DIR,
     recent: recent.map((r) => ({
       day: r.day,
       trigger: r.trigger,
       ok: r.ok,
       error: r.error || null,
-      pushed: !!(r.gitee && r.gitee.pushed),
+      // 一处成功一处失败时，只看 ok 会以为整次都白跑了
+      targets: (r.targets || []).map((t) => ({
+        name: t.name,
+        pushed: !!t.pushed,
+        skipped: !!t.skipped,
+        error: t.error || t.reason || null,
+      })),
       createdAt: r.createdAt,
     })),
   };
@@ -2753,11 +2862,20 @@ async function handleTimer(event) {
   const trigger = 'timer';
   try {
     const result = await runSnapshot(trigger);
+    // 一处推失败也记 ok:false：两处归档就是为了发现某个令牌失效，
+    // 但日志里保留 targets，还能看出另一处其实成功了
+    const ok = result.failedCount === 0;
+    const error = ok
+      ? null
+      : result.targets
+          .filter((t) => t.error)
+          .map((t) => t.label + '：' + t.error)
+          .join('；');
     await db.collection('snapshotLogs').add({
-      data: { ...result, ok: true, createdAt: new Date() },
+      data: { ...result, ok, error, createdAt: new Date() },
     });
-    console.log('[classmanage] 定时快照完成', result.filePath, result.gitee);
-    return { ok: true, data: result };
+    console.log('[classmanage] 定时快照完成', result.filePath, JSON.stringify(result.targets));
+    return ok ? { ok: true, data: result } : { ok: false, error, data: result };
   } catch (err) {
     const message = err && err.message ? err.message : String(err);
     await db.collection('snapshotLogs').add({
