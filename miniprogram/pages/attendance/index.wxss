@@ -112,6 +112,78 @@
   color: var(--warning);
 }
 
+/* ---------- 场次（面授课 / 晚修） ---------- */
+.tabs {
+  display: flex;
+  background: #f1f3f7;
+  border-radius: 14rpx;
+  padding: 6rpx;
+  margin-bottom: 24rpx;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 16rpx 0;
+  font-size: 26rpx;
+  color: var(--text-muted);
+  border-radius: 10rpx;
+}
+
+.tab.active {
+  background: #fff;
+  color: var(--brand);
+  font-weight: 500;
+}
+
+.session-sum {
+  display: flex;
+  gap: 12rpx;
+  margin-bottom: 12rpx;
+}
+
+/* 名单每行右侧并排两格：面授、晚修 */
+.session-cells {
+  display: flex;
+  gap: 16rpx;
+  align-items: center;
+}
+
+.session-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx;
+  min-width: 108rpx;
+}
+
+.session-tag {
+  font-size: 21rpx;
+  color: var(--text-muted);
+}
+
+/* 学生端状态卡里的两场明细 */
+.session-rows {
+  margin-top: 18rpx;
+}
+
+.session-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 25rpx;
+  padding: 12rpx 0;
+  border-top: 2rpx solid var(--border);
+}
+
+.session-name {
+  color: var(--text);
+}
+
+.session-state {
+  color: var(--text-muted);
+}
+
 .status-text {
   font-size: 34rpx;
   font-weight: 600;

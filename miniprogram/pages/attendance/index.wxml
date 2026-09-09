@@ -11,12 +11,24 @@
   <block wx:elif="{{isTeacher}}">
     <view class="card qr-card">
       <view class="card-title">
-        课堂考勤二维码
+        {{sessionLabel}}考勤二维码
         <text class="sub">{{className || '未选择班级'}}</text>
       </view>
       <view class="class-tip" wx:if="{{!className}}">
         请先在「概况」页顶部选择要考勤的班级
         <text class="link" bindtap="onGotoClasses">去选择</text>
+      </view>
+
+      <view class="tabs session-tabs">
+        <view
+          wx:for="{{sessions}}"
+          wx:key="key"
+          class="tab {{session === item.key ? 'active' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="onSession"
+        >
+          {{item.label}}
+        </view>
       </view>
 
       <view class="qr-stage">
@@ -74,7 +86,8 @@
 
       <view class="hint">
         二维码短效且一次性刷新，过期后失效；学生只能用摄像头现场扫码，无法自行打卡。
-        二维码绑定班级，其他班级的学生扫码会被拒绝。
+        二维码绑定班级与场次，其他班级的学生扫码会被拒绝；面授课与晚修各记一次，
+        两张码互不影响，切换场次不会让另一场的码失效。
       </view>
     </view>
 
@@ -82,7 +95,7 @@
     <view class="card" wx:if="{{code}}">
       <view class="card-title">
         本次扫码
-        <text class="sub">{{checkins.length}} 人已打卡</text>
+        <text class="sub">{{sessionLabel}} · {{checkins.length}} 人已打卡</text>
       </view>
       <view wx:for="{{checkins}}" wx:key="studentId" class="list-item">
         <view class="main">
@@ -100,24 +113,45 @@
     <view class="card" wx:if="{{todaySummary}}">
       <view class="card-title">
         今日考勤（{{todaySummary.day}}）
-        <text class="sub">{{todaySummary.checkedInCount}} / {{todaySummary.total}}</text>
+        <text class="sub">共 {{todaySummary.total}} 人</text>
+      </view>
+      <view class="session-sum" wx:if="{{todaySummary.sessionCounts}}">
+        <text class="badge badge-brand">面授课 {{todaySummary.sessionCounts.day}}</text>
+        <text class="badge badge-warning">晚修 {{todaySummary.sessionCounts.night}}</text>
       </view>
       <view wx:for="{{todaySummary.students}}" wx:key="studentId" class="list-item">
         <view class="main">
           <view class="title">{{item.name}}</view>
           <view class="desc">
-            {{item.studentIdAssigned ? item.studentId : '待分配学号 · ' + (item.phone || '')}}{{item.reason ? ' · ' + item.reason : ''}}
+            {{item.studentIdAssigned ? item.studentId : '待分配学号 · ' + (item.phone || '')}}
           </view>
         </view>
-        <view class="aside">
-          <text wx:if="{{item.checkedIn}}" class="badge badge-success">已打卡</text>
-          <view
-            wx:else
-            class="btn btn-ghost btn-sm"
-            data-id="{{item.studentId}}"
-            bindtap="onManualCheckin"
-          >
-            补录
+        <view class="aside session-cells">
+          <view class="session-cell">
+            <text class="session-tag">面授</text>
+            <text wx:if="{{item.dayState.checkedIn}}" class="badge badge-success">已打卡</text>
+            <view
+              wx:else
+              class="btn btn-ghost btn-sm"
+              data-id="{{item.studentId}}"
+              data-session="day"
+              bindtap="onManualCheckin"
+            >
+              补录
+            </view>
+          </view>
+          <view class="session-cell">
+            <text class="session-tag">晚修</text>
+            <text wx:if="{{item.nightState.checkedIn}}" class="badge badge-success">已打卡</text>
+            <view
+              wx:else
+              class="btn btn-ghost btn-sm"
+              data-id="{{item.studentId}}"
+              data-session="night"
+              bindtap="onManualCheckin"
+            >
+              补录
+            </view>
           </view>
         </view>
       </view>
@@ -127,13 +161,17 @@
 
   <!-- ============ 学生端：扫码打卡 ============ -->
   <block wx:else>
-    <view class="card status-card {{myStatus.checkedIn ? 'done' : 'pending'}}" wx:if="{{myStatus}}">
-      <view class="status-icon">{{myStatus.checkedIn ? '✓' : '!'}}</view>
-      <view class="status-text">{{myStatus.checkedIn ? '今日已打卡' : '今日未打卡'}}</view>
-      <view class="status-desc" wx:if="{{myStatus.checkedIn}}">
-        {{myStatus.timeText}} · {{myStatus.via}}
+    <view class="card status-card {{myStatus.allDone ? 'done' : 'pending'}}" wx:if="{{myStatus}}">
+      <view class="status-icon">{{myStatus.allDone ? '✓' : '!'}}</view>
+      <view class="status-text">今日已打卡 {{myStatus.doneCount}} / {{myStatus.sessions.length}} 场</view>
+      <view class="session-rows">
+        <view wx:for="{{myStatus.sessions}}" wx:key="session" class="session-row">
+          <text class="session-name">{{item.sessionLabel}}</text>
+          <text class="session-state">
+            {{item.checkedIn ? item.timeText : '未打卡'}}
+          </text>
+        </view>
       </view>
-      <view class="status-desc" wx:else>请扫描教师出示的考勤二维码完成打卡</view>
       <view class="status-class" wx:if="{{className}}">{{className}}</view>
     </view>
 
@@ -141,10 +179,10 @@
       <button
         class="btn btn-primary scan-btn"
         loading="{{scanning}}"
-        disabled="{{myStatus.checkedIn}}"
+        disabled="{{myStatus.allDone}}"
         bindtap="onScan"
       >
-        {{myStatus.checkedIn ? '今日已完成打卡' : '扫码打卡'}}
+        {{myStatus.allDone ? '今日两场都已打卡' : '扫码打卡'}}
       </button>
       <view class="hint">
         打卡须现场扫描教师端出示的二维码，二维码短时间内即失效，相册截图无法使用。
@@ -155,9 +193,10 @@
 
     <view class="card">
       <view class="card-title">打卡说明</view>
-      <view class="step"><text class="step-no">1</text>课堂上教师在自己的手机上生成考勤二维码。</view>
+      <view class="step"><text class="step-no">1</text>白天面授课与晚修各考勤一次，教师分别出示二维码。</view>
       <view class="step"><text class="step-no">2</text>点击「扫码打卡」，用摄像头扫描该二维码。</view>
-      <view class="step"><text class="step-no">3</text>打卡成功后自动记考勤加分 1 分，每人每天限一次。</view>
+      <view class="step"><text class="step-no">3</text>记的是哪一场由二维码决定，扫哪张就记哪一场。</view>
+      <view class="step"><text class="step-no">4</text>每场打卡成功记考勤加分 1 分，同一场每天限一次。</view>
     </view>
   </block>
 </view>

@@ -11,6 +11,12 @@ const TTL_OPTIONS = [
   { label: '5 分钟', value: 300 },
 ];
 
+// 考勤场次：白天面授课与晚修各算一次，同一天互不影响
+const SESSIONS = [
+  { key: 'day', label: '面授课' },
+  { key: 'night', label: '晚修' },
+];
+
 const STATUS_POLL_MS = 3000;
 
 // 首次调用摄像头前须明确告知用途并取得同意，同意后不再重复打扰
@@ -27,6 +33,9 @@ Page({
     className: '',
 
     // 教师端
+    sessions: SESSIONS,
+    session: 'day',
+    sessionLabel: '面授课',
     ttlOptions: TTL_OPTIONS,
     ttlIndex: 1,
     autoRefresh: true,
@@ -85,6 +94,24 @@ Page({
   // 教师端：生成短效二维码
   // ============================================================
 
+  // 切换场次：面授课与晚修各自出码，切换时当前这张码就不该继续展示
+  onSession(e) {
+    const key = e.currentTarget.dataset.key;
+    if (key === this.data.session) return;
+    const found = SESSIONS.find((x) => x.key === key);
+    this.stopTimers();
+    this.setData(
+      {
+        session: key,
+        sessionLabel: found ? found.label : key,
+        code: null,
+        checkins: [],
+        remaining: 0,
+      },
+      () => this.loadTodaySummary()
+    );
+  },
+
   onTtlChange(e) {
     this.setData({ ttlIndex: Number(e.detail.value) });
   },
@@ -100,7 +127,7 @@ Page({
       const ttl = TTL_OPTIONS[this.data.ttlIndex].value;
       const code = await api.call(
         'attendance.createCode',
-        { ttl, className: this.data.className },
+        { ttl, className: this.data.className, session: this.data.session },
         { loading: false }
       );
       // 以服务端时间为基准计算倒计时，避免手机时钟偏差
@@ -216,7 +243,18 @@ Page({
         { className: this.data.className },
         { loading: false }
       );
-      this.setData({ todaySummary: summary });
+      // WXML 里按场次取值不方便，这里摊平成两个字段
+      const pick = (st, key) => (st.sessions || []).find((x) => x.session === key) || { checkedIn: false };
+      this.setData({
+        todaySummary: {
+          ...summary,
+          students: (summary.students || []).map((st) => ({
+            ...st,
+            dayState: pick(st, 'day'),
+            nightState: pick(st, 'night'),
+          })),
+        },
+      });
     } catch (e) {
       // 错误提示已在 api 层弹出
     }
@@ -225,14 +263,16 @@ Page({
   // 教师补录：学生忘带手机等特殊情况
   async onManualCheckin(e) {
     const studentId = String(e.currentTarget.dataset.id || '').trim();
+    const session = String(e.currentTarget.dataset.session || this.data.session);
     if (!studentId) {
       util.toast('缺少学号');
       return;
     }
-    const ok = await util.confirm('确认为该学生补录今日考勤吗？', '补录考勤');
+    const label = (SESSIONS.find((x) => x.key === session) || {}).label || session;
+    const ok = await util.confirm(`确认为该学生补录今日${label}考勤吗？`, '补录考勤');
     if (!ok) return;
     try {
-      const res = await api.call('attendance.manualCheckin', { studentId });
+      const res = await api.call('attendance.manualCheckin', { studentId, session });
       util.toast(res.message, 'success');
       await this.loadTodaySummary();
     } catch (err) {
@@ -247,8 +287,19 @@ Page({
   async loadMyStatus() {
     try {
       const status = await api.call('attendance.today', {}, { loading: false });
+      // 兼容旧版云函数：没有 sessions 时退回单场次（面授）
+      const sessions = (status.sessions || [
+        { session: 'day', sessionLabel: '面授课', checkedIn: status.checkedIn, timestamp: status.timestamp },
+      ]).map((x) => ({ ...x, timeText: util.formatDateTime(x.timestamp) }));
       this.setData({
-        myStatus: { ...status, timeText: util.formatDateTime(status.timestamp) },
+        myStatus: {
+          ...status,
+          sessions,
+          // 两场都打完了才没得可打
+          allDone: sessions.every((x) => x.checkedIn),
+          doneCount: sessions.filter((x) => x.checkedIn).length,
+          timeText: util.formatDateTime(status.timestamp),
+        },
       });
     } catch (e) {
       // 错误提示已在 api 层弹出
@@ -291,7 +342,11 @@ Page({
   async submitCheckin(content) {
     try {
       const res = await api.call('attendance.checkin', { content });
-      wx.showModal({ title: '打卡成功', content: res.message, showCancel: false });
+      wx.showModal({
+        title: (res.sessionLabel || '') + '打卡成功',
+        content: res.message,
+        showCancel: false,
+      });
       await this.loadMyStatus();
     } catch (e) {
       // 错误提示已在 api 层弹出

@@ -37,6 +37,21 @@ const CERTIFICATE_IMAGES = {
   三等奖: '/images/certificates/certificate_003.jpg',
 };
 
+/**
+ * 考勤场次：白天面授课与晚修各算一次，同一天两次互不影响。
+ * 升级前的记录没有 session 字段，一律按面授处理，因此 'day' 必须是默认值。
+ */
+const ATTENDANCE_SESSIONS = ['day', 'night'];
+const SESSION_LABELS = { day: '面授课', night: '晚修' };
+const DEFAULT_SESSION = 'day';
+
+function normalizeSession(value) {
+  const v = String(value || '').trim();
+  if (!v) return DEFAULT_SESSION;
+  if (ATTENDANCE_SESSIONS.indexOf(v) < 0) fail('考勤场次无效');
+  return v;
+}
+
 // 考勤码有效期（秒）：默认 60 秒，可在 15~600 秒之间调整
 const DEFAULT_CODE_TTL = 60;
 const MIN_CODE_TTL = 15;
@@ -1087,7 +1102,7 @@ actions['score.list'] = async ({ user, payload }) => {
 
 // ---------- 考勤 ----------
 
-// 教师生成短效考勤二维码：同一时刻只保留一个有效码
+// 教师生成短效考勤二维码：同一场次同一时刻只保留一个有效码
 actions['attendance.createCode'] = async ({ user, payload }) => {
   requireTeacher(user);
   let ttl = Number(payload.ttl) || DEFAULT_CODE_TTL;
@@ -1095,14 +1110,17 @@ actions['attendance.createCode'] = async ({ user, payload }) => {
 
   const className = String(payload.className || '').trim();
   if (!className) fail('请先选择要考勤的班级');
+  const session = normalizeSession(payload.session);
 
   const now = new Date();
-  // 作废该教师此前尚未过期的考勤码，避免旧二维码被截图复用
+  // 作废该教师此前尚未过期的考勤码。只作废同一场次的：
+  // 面授课的码还在倒计时，不该被新生成的晚修码顶掉
   const stale = await db
     .collection('attendanceCodes')
     .where({ createdBy: user.username, revoked: _.neq(true), expireAt: _.gt(now) })
     .get();
   for (const code of stale.data) {
+    if ((code.session || DEFAULT_SESSION) !== session) continue;
     await db.collection('attendanceCodes').doc(code._id).update({ data: { revoked: true } });
   }
 
@@ -1112,6 +1130,7 @@ actions['attendance.createCode'] = async ({ user, payload }) => {
     token,
     ttl,
     className,
+    session,
     semesterId: await currentSemesterId(),
     createdBy: user.username,
     createdAt: now,
@@ -1127,6 +1146,8 @@ actions['attendance.createCode'] = async ({ user, payload }) => {
     content: QR_PREFIX + token,
     ttl,
     className,
+    session,
+    sessionLabel: SESSION_LABELS[session],
     expireAt: expireAt.getTime(),
     serverNow: now.getTime(),
   };
@@ -1144,7 +1165,10 @@ actions['attendance.codeStatus'] = async ({ user, payload }) => {
   );
   const students = await studentMap();
   const now = new Date();
+  const session = code.data.session || DEFAULT_SESSION;
   return {
+    session,
+    sessionLabel: SESSION_LABELS[session],
     expired: code.data.revoked === true || new Date(code.data.expireAt).getTime() <= now.getTime(),
     expireAt: new Date(code.data.expireAt).getTime(),
     serverNow: now.getTime(),
@@ -1162,6 +1186,20 @@ actions['attendance.revokeCode'] = async ({ user, payload }) => {
   await db.collection('attendanceCodes').doc(payload.codeId).update({ data: { revoked: true } });
   return { message: '二维码已失效' };
 };
+
+/**
+ * 当天该学生某个场次是否已打卡。
+ * 升级前的考勤记录没有 session 字段，查库时用 session:'day' 会漏掉它们，
+ * 于是同一个人当天还能再打一次面授。因此先按天取回再在内存里判定。
+ */
+async function attendanceOf(studentId, day) {
+  const rows = await fetchAll(
+    db.collection('scoreRecords').where({ studentId, scoreType: 'attendance', day })
+  );
+  const map = {};
+  for (const r of rows) map[r.session || DEFAULT_SESSION] = r;
+  return map;
+}
 
 // 学生扫码打卡：必须携带教师端生成且尚未过期的令牌
 actions['attendance.checkin'] = async ({ user, payload }) => {
@@ -1190,19 +1228,21 @@ actions['attendance.checkin'] = async ({ user, payload }) => {
     fail(`该二维码属于「${code.className}」，你不在这个班级`);
   }
 
+  // 场次取自二维码本身，学生无从选择，扫哪个码就记哪一场
+  const session = code.session || DEFAULT_SESSION;
+  const label = SESSION_LABELS[session];
+
   const day = beijingDay(now);
-  const dup = await db
-    .collection('scoreRecords')
-    .where({ studentId: user.studentId, scoreType: 'attendance', day })
-    .count();
-  if (dup.total) fail('今日已打卡，每人每天只能打卡一次');
+  const done = await attendanceOf(user.studentId, day);
+  if (done[session]) fail(`今日${label}已打卡，每人每场次每天只能打卡一次`);
 
   const record = {
     studentId: user.studentId,
     semesterId: code.semesterId || (await currentSemesterId()),
     scoreType: 'attendance',
+    session,
     score: 1,
-    reason: '扫码考勤打卡',
+    reason: label + '扫码打卡',
     operator: user.username,
     timestamp: now,
     day,
@@ -1212,7 +1252,9 @@ actions['attendance.checkin'] = async ({ user, payload }) => {
   await db.collection('attendanceCodes').doc(code._id).update({ data: { checkinCount: _.inc(1) } });
 
   return {
-    message: '打卡成功，考勤加 1 分',
+    message: `${label}打卡成功，考勤加 1 分`,
+    session,
+    sessionLabel: label,
     record: { _id: added._id, ...record, studentName: student.data[0].name },
   };
 };
@@ -1222,36 +1264,38 @@ actions['attendance.manualCheckin'] = async ({ user, payload }) => {
   requireTeacher(user);
   const studentId = String(payload.studentId || '').trim();
   if (!studentId) fail('学号不能为空');
+  const session = normalizeSession(payload.session);
+  const label = SESSION_LABELS[session];
 
   const student = await db.collection('students').where({ studentId }).limit(1).get();
   if (!student.data.length) fail('学生不存在');
 
   const now = new Date();
   const day = beijingDay(now);
-  const dup = await db
-    .collection('scoreRecords')
-    .where({ studentId, scoreType: 'attendance', day })
-    .count();
-  if (dup.total) fail('该学生今日已打卡');
+  const done = await attendanceOf(studentId, day);
+  if (done[session]) fail(`该学生今日${label}已打卡`);
 
   const record = {
     studentId,
     semesterId: await currentSemesterId(),
     scoreType: 'attendance',
+    session,
     score: 1,
-    reason: '课堂考勤打卡（教师补录）',
+    reason: label + '考勤（教师补录）',
     operator: user.username,
     timestamp: now,
     day,
   };
   const added = await db.collection('scoreRecords').add({ data: record });
   return {
-    message: '补录成功',
+    message: label + '补录成功',
+    session,
+    sessionLabel: label,
     record: { _id: added._id, ...record, studentName: student.data[0].name },
   };
 };
 
-// 今日考勤概况：学生看自己的状态，教师看全班명单
+// 今日考勤概况：面授课与晚修分开统计，学生看自己的状态，教师看全班名单
 actions['attendance.today'] = async ({ user, payload }) => {
   requireLogin(user);
   const day = beijingDay();
@@ -1259,13 +1303,30 @@ actions['attendance.today'] = async ({ user, payload }) => {
     db.collection('scoreRecords').where({ scoreType: 'attendance', day })
   );
 
+  // 键为「学号|场次」，升级前没有 session 的记录归入面授
+  const byKey = {};
+  for (const r of records) byKey[r.studentId + '|' + (r.session || DEFAULT_SESSION)] = r;
+  const stateOf = (studentId, session) => {
+    const r = byKey[studentId + '|' + session];
+    return {
+      session,
+      sessionLabel: SESSION_LABELS[session],
+      checkedIn: !!r,
+      timestamp: r ? r.timestamp : null,
+      reason: r ? r.reason : null,
+    };
+  };
+
   if (user.role === 'student') {
-    const mine = records.find((r) => r.studentId === user.studentId);
+    const sessions = ATTENDANCE_SESSIONS.map((x) => stateOf(user.studentId, x));
+    const day1 = sessions[0];
     return {
       day,
-      checkedIn: !!mine,
-      timestamp: mine ? mine.timestamp : null,
-      via: mine ? mine.reason : null,
+      sessions,
+      // 兼容旧版小程序：这几个字段仍指面授课
+      checkedIn: day1.checkedIn,
+      timestamp: day1.timestamp,
+      via: day1.reason,
     };
   }
 
@@ -1275,23 +1336,34 @@ actions['attendance.today'] = async ({ user, payload }) => {
       ? db.collection('students').where({ className }).orderBy('name', 'asc')
       : db.collection('students').orderBy('className', 'asc')
   );
-  const byId = {};
-  for (const r of records) byId[r.studentId] = r;
-  return {
-    day,
-    className,
-    total: list.length,
-    checkedInCount: list.filter((s) => byId[s.studentId]).length,
-    students: list.map((s) => ({
+
+  const students = list.map((s) => {
+    const sessions = ATTENDANCE_SESSIONS.map((x) => stateOf(s.studentId, x));
+    return {
       studentId: s.studentId,
       name: s.name,
       className: s.className,
       studentIdAssigned: s.studentIdAssigned !== false,
       phone: s.phone || null,
-      checkedIn: !!byId[s.studentId],
-      timestamp: byId[s.studentId] ? byId[s.studentId].timestamp : null,
-      reason: byId[s.studentId] ? byId[s.studentId].reason : null,
-    })),
+      sessions,
+      checkedIn: sessions[0].checkedIn,
+      timestamp: sessions[0].timestamp,
+      reason: sessions[0].reason,
+    };
+  });
+
+  const counts = {};
+  for (const x of ATTENDANCE_SESSIONS) {
+    counts[x] = students.filter((s) => s.sessions.find((v) => v.session === x).checkedIn).length;
+  }
+
+  return {
+    day,
+    className,
+    total: list.length,
+    sessionCounts: counts,
+    checkedInCount: counts[DEFAULT_SESSION],
+    students,
   };
 };
 
