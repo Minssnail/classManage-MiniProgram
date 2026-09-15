@@ -51,7 +51,7 @@
           <view class="desc">{{item.timeText}} · 操作员 {{item.operator}}</view>
         </view>
         <view class="aside">
-          <text class="badge {{item.score > 0 ? 'badge-success' : 'badge-danger'}}">
+          <text class="badge {{item.countsTowardTotal === false ? 'badge-muted' : item.score > 0 ? 'badge-success' : 'badge-danger'}}">
             {{item.score > 0 ? '+' : ''}}{{item.score}}
           </text>
         </view>

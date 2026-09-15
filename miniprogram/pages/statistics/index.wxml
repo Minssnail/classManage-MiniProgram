@@ -19,6 +19,7 @@
       <text>7 天累计 {{totalWeek}} 分</text>
       <text class="muted">单日最高 {{maxValue}} 分</text>
     </view>
+    <view class="night-note" wx:if="{{nightWeek}}">另有晚修加分 {{nightWeek}} 分，单独统计，未计入上图</view>
   </view>
 
   <view class="card">
@@ -32,6 +33,7 @@
         <view class="bar-fill" style="width: {{item.percent}}%"></view>
       </view>
     </view>
+    <view class="night-note" wx:if="{{nightTotal}}">本学期另有晚修加分 {{nightTotal}} 分，单独统计，不计入占比</view>
     <view wx:if="{{loaded && !typeBars.length}}" class="empty">暂无统计数据</view>
   </view>
 </view>

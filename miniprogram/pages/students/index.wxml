@@ -115,6 +115,7 @@
       </view>
       <view class="aside">
         <text class="badge badge-success">{{item.totalScore}} 分</text>
+        <text wx:if="{{item.nightScore}}" class="night-score">晚修 {{item.nightScore}}</text>
       </view>
     </view>
     <view wx:if="{{loaded && !students.length}}" class="empty">该班级暂无学生</view>

@@ -34,6 +34,11 @@ const SCORE_TYPE_LABELS = {
 };
 const SCORE_TYPES = Object.keys(SCORE_TYPE_LABELS);
 
+// 晚修加分单独统计、不计入总分，与云函数的判定保持一致
+function isNightBonus(r) {
+  return r.scoreType === 'attendance' && r.session === 'night';
+}
+
 // 云开发导出的是 JSON Lines（每行一个文档），这里也兼容普通 JSON 数组
 function readDocs(name, required) {
   const file = path.join(RAW_DIR, name);
@@ -92,8 +97,13 @@ function today() {
 function buildRanking(students, records) {
   const totals = {};
   const byType = {};
+  const nightTotals = {};
   for (const r of records) {
     const id = r.studentId;
+    if (isNightBonus(r)) {
+      nightTotals[id] = (nightTotals[id] || 0) + (Number(r.score) || 0);
+      continue;
+    }
     totals[id] = (totals[id] || 0) + (Number(r.score) || 0);
     if (!byType[id]) byType[id] = {};
     byType[id][r.scoreType] = (byType[id][r.scoreType] || 0) + (Number(r.score) || 0);
@@ -103,6 +113,7 @@ function buildRanking(students, records) {
       name: maskName(s.name),
       key: maskKey(s.studentId),
       total: totals[s.studentId] || 0,
+      night: nightTotals[s.studentId] || 0,
       types: byType[s.studentId] || {},
     }))
     .sort((a, b) => b.total - a.total || (a.key < b.key ? -1 : 1));
@@ -110,11 +121,12 @@ function buildRanking(students, records) {
 
 function renderTable(ranking) {
   const header =
-    '| 名次 | 姓名 | 标识 | ' + SCORE_TYPES.map((t) => SCORE_TYPE_LABELS[t]).join(' | ') + ' | 总分 |';
-  const divider = '| ---: | --- | --- |' + SCORE_TYPES.map(() => ' ---: |').join('') + ' ---: |';
+    '| 名次 | 姓名 | 标识 | ' + SCORE_TYPES.map((t) => SCORE_TYPE_LABELS[t]).join(' | ') + ' | 总分 | 晚修 |';
+  const divider =
+    '| ---: | --- | --- |' + SCORE_TYPES.map(() => ' ---: |').join('') + ' ---: | ---: |';
   const rows = ranking.map((r, i) => {
     const cells = SCORE_TYPES.map((t) => r.types[t] || 0);
-    return `| ${i + 1} | ${r.name} | ${r.key} | ${cells.join(' | ')} | **${r.total}** |`;
+    return `| ${i + 1} | ${r.name} | ${r.key} | ${cells.join(' | ')} | **${r.total}** | ${r.night} |`;
   });
   return [header, divider, ...rows].join('\n');
 }
@@ -168,6 +180,7 @@ function main() {
       const subset = classRecords.filter((r) => (r.semesterId || null) === sid);
       const ranking = buildRanking(classStudents, subset);
       const total = ranking.reduce((n, r) => n + r.total, 0);
+      const nightTotal = ranking.reduce((n, r) => n + r.night, 0);
       const range = dayRange(subset);
 
       // 没导出 semesters.json 时用记录的日期区间兜底，否则多个学期会都叫「未知学期」而无法区分
@@ -177,9 +190,11 @@ function main() {
         if (range) label += `（${range.from} 至 ${range.to}）`;
       }
 
-      const meta = range
-        ? `记录 ${subset.length} 条，合计 ${total} 分，覆盖 ${range.from} 至 ${range.to}。`
-        : `记录 ${subset.length} 条，合计 ${total} 分。`;
+      const meta =
+        `记录 ${subset.length} 条，合计 ${total} 分` +
+        (nightTotal ? `，另有晚修加分 ${nightTotal} 分（不计入合计）` : '') +
+        (range ? `，覆盖 ${range.from} 至 ${range.to}` : '') +
+        '。';
 
       lines.push(`### ${label}`, '', meta, '', renderTable(ranking), '');
       sections++;

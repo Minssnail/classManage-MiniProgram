@@ -8,6 +8,7 @@
     <view class="score" wx:if="{{!isTeacher && myTotalScore !== null}}">
       <view class="score-value">{{myTotalScore}}</view>
       <view class="score-label">本学期积分</view>
+      <view class="score-night" wx:if="{{myNightScore}}">晚修 {{myNightScore}}（另计）</view>
     </view>
   </view>
 

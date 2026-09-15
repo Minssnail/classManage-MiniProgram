@@ -79,3 +79,9 @@
   background: linear-gradient(90deg, #4c6ef5, #3b5bdb);
   min-width: 8rpx;
 }
+
+.night-note {
+  margin-top: 16rpx;
+  font-size: 22rpx;
+  color: var(--text-muted);
+}

@@ -105,3 +105,10 @@
   padding: 36rpx 32rpx 32rpx;
   width: 100%;
 }
+
+/* 晚修加分另计，不在上面的积分里 */
+.score-night {
+  margin-top: 6rpx;
+  font-size: 20rpx;
+  opacity: 0.8;
+}

@@ -9,6 +9,7 @@ Page({
     displayName: '',
     semesterLabel: '',
     myTotalScore: null,
+    myNightScore: 0,
 
     passwordVisible: false,
     oldPassword: '',
@@ -47,7 +48,7 @@ Page({
           { semesterId: app.effectiveSemesterId() },
           { loading: false, silent: true }
         );
-        this.setData({ myTotalScore: overview.myTotalScore });
+        this.setData({ myTotalScore: overview.myTotalScore, myNightScore: overview.myNightScore || 0 });
       } catch (e) {
         // 概览失败不影响个人中心其余内容
       }

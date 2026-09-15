@@ -47,6 +47,17 @@ const ATTENDANCE_SESSIONS = ['day', 'night'];
 const SESSION_LABELS = { day: '面授课', night: '晚修' };
 const DEFAULT_SESSION = 'day';
 
+/**
+ * 晚修加分单独统计，不计入总积分。
+ *
+ * 晚修打卡仍按 1 分记一条考勤记录——这样积分明细里看得到、每周快照也归档得到——
+ * 只是所有「总分」「排名」「类型分布」「趋势」都把它排除在外，另给一个晚修分。
+ * 判定只看记录本身（考勤 + 晚修场次），之前已经记下的晚修记录无需迁移就会自动生效。
+ */
+function isNightBonus(record) {
+  return !!record && record.scoreType === 'attendance' && record.session === 'night';
+}
+
 function normalizeSession(value) {
   const v = String(value || '').trim();
   if (!v) return DEFAULT_SESSION;
@@ -632,8 +643,10 @@ actions['student.list'] = async ({ user, payload }) => {
   );
 
   const totals = {};
+  const nightTotals = {};
   for (const record of scores) {
-    totals[record.studentId] = (totals[record.studentId] || 0) + record.score;
+    const bucket = isNightBonus(record) ? nightTotals : totals;
+    bucket[record.studentId] = (bucket[record.studentId] || 0) + record.score;
   }
   const resolver = await buildRuleResolver();
   let majors = [];
@@ -663,6 +676,7 @@ actions['student.list'] = async ({ user, payload }) => {
         rowKey: s._id,
         ...describeIdentity(s, roles),
         totalScore: totals[s.studentId] || 0,
+        nightScore: nightTotals[s.studentId] || 0,
         studentIdAssigned: s.studentIdAssigned !== false,
         // 学生自己绑定的规则，为空表示沿用班级默认
         ownRuleCode: s.ruleCode || null,
@@ -1134,7 +1148,10 @@ actions['score.list'] = async ({ user, payload }) => {
   const records = all.filter((r) => scope.match(r));
   const limited = records.slice(0, Number(payload.limit) || 200);
   const [students, semesters] = [await studentMap(), await semesterMap()];
-  const decorated = decorate(limited, students, semesters);
+  const decorated = decorate(limited, students, semesters).map((r) => ({
+    ...r,
+    countsTowardTotal: !isNightBonus(r),
+  }));
   return {
     records:
       user.role === 'teacher'
@@ -1435,6 +1452,13 @@ actions['attendance.revokeCode'] = async ({ user, payload }) => {
   return { message: '二维码已失效' };
 };
 
+// 学生打完卡要知道这 1 分记在哪本账上，晚修的不会出现在总积分里
+function bonusMessage(session, label) {
+  return session === 'night'
+    ? label + '打卡成功，晚修加 1 分（单独统计，不计入总积分）'
+    : label + '打卡成功，考勤加 1 分';
+}
+
 /**
  * 当天该学生某个场次是否已打卡。
  * 升级前的考勤记录没有 session 字段，查库时用 session:'day' 会漏掉它们，
@@ -1503,7 +1527,7 @@ actions['attendance.checkin'] = async ({ user, payload }) => {
   await db.collection('attendanceCodes').doc(code._id).update({ data: { checkinCount: _.inc(1) } });
 
   return {
-    message: `${label}打卡成功，考勤加 1 分`,
+    message: bonusMessage(session, label),
     session,
     sessionLabel: label,
     record: { _id: added._id, ...record, studentName: student.data[0].name },
@@ -1563,7 +1587,7 @@ actions['attendance.selfCheckin'] = async ({ user, payload }) => {
   await db.collection('attendanceCodes').doc(code._id).update({ data: { checkinCount: _.inc(1) } });
 
   return {
-    message: `${label}打卡成功，考勤加 1 分`,
+    message: bonusMessage(session, label),
     session,
     sessionLabel: label,
     record: { _id: added._id, ...record, studentName: me.name },
@@ -1800,21 +1824,29 @@ actions['stats.overview'] = async ({ user, payload }) => {
   const today = beijingDay();
   let todayScores = 0;
   const activeStudents = new Set();
+  // 晚修加分另起一本账：不进类型分布，也不进累计与今日积分
+  const night = { total: 0, today: 0, students: new Set() };
 
   for (const r of records) {
+    // 今日打卡人数看的是到没到，晚修到了也算
+    if (r.day === today && r.scoreType === 'attendance') activeStudents.add(r.studentId);
+    if (isNightBonus(r)) {
+      night.total += r.score;
+      night.students.add(r.studentId);
+      if (r.day === today) night.today += r.score;
+      continue;
+    }
     if (typeStats[r.scoreType] === undefined) typeStats[r.scoreType] = 0;
     typeStats[r.scoreType] += r.score;
-    if (r.day === today) {
-      todayScores += r.score;
-      if (r.scoreType === 'attendance') activeStudents.add(r.studentId);
-    }
+    if (r.day === today) todayScores += r.score;
   }
 
   let myTotal = null;
+  let myNight = null;
   if (user.role === 'student') {
-    myTotal = records
-      .filter((r) => r.studentId === user.studentId)
-      .reduce((sum, r) => sum + r.score, 0);
+    const mine = records.filter((r) => r.studentId === user.studentId);
+    myTotal = mine.filter((r) => !isNightBonus(r)).reduce((sum, r) => sum + r.score, 0);
+    myNight = mine.filter(isNightBonus).reduce((sum, r) => sum + r.score, 0);
   }
 
   return {
@@ -1824,6 +1856,12 @@ actions['stats.overview'] = async ({ user, payload }) => {
     todayScores,
     activeStudents: activeStudents.size,
     myTotalScore: myTotal,
+    myNightScore: myNight,
+    nightStats: {
+      total: night.total,
+      today: night.today,
+      studentCount: night.students.size,
+    },
     semesterId,
     className,
   };
@@ -1843,8 +1881,13 @@ actions['stats.ranking'] = async ({ user, payload }) => {
   );
   const records = all.filter((r) => scope.match(r));
 
+  // 排名只按总积分，晚修加分单列
   const totals = {};
-  for (const r of records) totals[r.studentId] = (totals[r.studentId] || 0) + r.score;
+  const nightTotals = {};
+  for (const r of records) {
+    const bucket = isNightBonus(r) ? nightTotals : totals;
+    bucket[r.studentId] = (bucket[r.studentId] || 0) + r.score;
+  }
 
   const index = {};
   for (const s of students) index[s.studentId] = s;
@@ -1856,6 +1899,7 @@ actions['stats.ranking'] = async ({ user, payload }) => {
       className: s.className,
       studentIdAssigned: s.studentIdAssigned !== false,
       totalScore: totals[s.studentId] || 0,
+      nightScore: nightTotals[s.studentId] || 0,
     }))
     .sort((a, b) => b.totalScore - a.totalScore);
 
@@ -1879,15 +1923,23 @@ actions['stats.trend'] = async ({ user, payload }) => {
   const all = await fetchAll(db.collection('scoreRecords').where(where));
   const records = all.filter((r) => scope.match(r));
   const byDay = {};
-  for (const d of days) byDay[d] = 0;
+  const nightByDay = {};
+  for (const d of days) {
+    byDay[d] = 0;
+    nightByDay[d] = 0;
+  }
   for (const r of records) {
-    if (byDay[r.day] !== undefined) byDay[r.day] += r.score;
+    if (byDay[r.day] === undefined) continue;
+    if (isNightBonus(r)) nightByDay[r.day] += r.score;
+    else byDay[r.day] += r.score;
   }
 
   return {
     days,
     labels: days.map((d) => d.slice(5)),
+    // 趋势是总积分的趋势，晚修另给一列
     values: days.map((d) => byDay[d]),
+    nightValues: days.map((d) => nightByDay[d]),
     role: user.role,
     semesterId,
     className,
@@ -2879,8 +2931,13 @@ function buildSnapshotMarkdown(students, records, semesters, stamp) {
 
       const totals = {};
       const byType = {};
+      const nightTotals = {};
       for (const r of subset) {
         const id = r.studentId;
+        if (isNightBonus(r)) {
+          nightTotals[id] = (nightTotals[id] || 0) + (Number(r.score) || 0);
+          continue;
+        }
         totals[id] = (totals[id] || 0) + (Number(r.score) || 0);
         if (!byType[id]) byType[id] = {};
         byType[id][r.scoreType] = (byType[id][r.scoreType] || 0) + (Number(r.score) || 0);
@@ -2891,19 +2948,24 @@ function buildSnapshotMarkdown(students, records, semesters, stamp) {
           name: maskName(s.name),
           key: maskKey(s.studentId),
           total: totals[s.studentId] || 0,
+          night: nightTotals[s.studentId] || 0,
           types: byType[s.studentId] || {},
         }))
         .sort((a, b) => b.total - a.total || (a.key < b.key ? -1 : 1));
 
       const sum = ranking.reduce((n, r) => n + r.total, 0);
-      const meta = range
-        ? '记录 ' + subset.length + ' 条，合计 ' + sum + ' 分，覆盖 ' + range.from + ' 至 ' + range.to + '。'
-        : '记录 ' + subset.length + ' 条，合计 ' + sum + ' 分。';
+      const nightSum = ranking.reduce((n, r) => n + r.night, 0);
+      const nightNote = nightSum ? '另有晚修加分 ' + nightSum + ' 分（不计入合计）' : '';
+      const meta =
+        '记录 ' + subset.length + ' 条，合计 ' + sum + ' 分' +
+        (nightNote ? '，' + nightNote : '') +
+        (range ? '，覆盖 ' + range.from + ' 至 ' + range.to : '') +
+        '。';
 
       const header =
-        '| 名次 | 姓名 | 标识 | ' + SNAPSHOT_SCORE_TYPES.map((t) => t[1]).join(' | ') + ' | 总分 |';
+        '| 名次 | 姓名 | 标识 | ' + SNAPSHOT_SCORE_TYPES.map((t) => t[1]).join(' | ') + ' | 总分 | 晚修 |';
       const divider =
-        '| ---: | --- | --- |' + SNAPSHOT_SCORE_TYPES.map(() => ' ---: |').join('') + ' ---: |';
+        '| ---: | --- | --- |' + SNAPSHOT_SCORE_TYPES.map(() => ' ---: |').join('') + ' ---: | ---: |';
       const rows = ranking.map(
         (r, i) =>
           '| ' +
@@ -2916,7 +2978,9 @@ function buildSnapshotMarkdown(students, records, semesters, stamp) {
           SNAPSHOT_SCORE_TYPES.map((t) => r.types[t[0]] || 0).join(' | ') +
           ' | **' +
           r.total +
-          '** |'
+          '** | ' +
+          r.night +
+          ' |'
       );
 
       lines.push('### ' + label, '', meta, '', [header, divider, ...rows].join('\n'), '');

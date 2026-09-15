@@ -17,12 +17,19 @@ const SCORE_TYPE_LABELS = SCORE_TYPES.reduce((map, item) => {
 
 const REWARD_TYPES = ['一等奖', '二等奖', '三等奖'];
 
+// 积分明细的类型标签。晚修打卡也是一条考勤记录，但单独统计、不计入总积分，要标出来
+function recordTypeLabel(record) {
+  if (record && record.countsTowardTotal === false) return '晚修考勤 · 不计入总积分';
+  return SCORE_TYPE_LABELS[record && record.scoreType] || (record && record.scoreType) || '';
+}
+
 // 加分说明（与 Web 版规则保持一致）
 const BONUS_RULES = [
   {
     title: '1、考勤加分',
     detail:
-      '一周内全勤加3分，请假一天加2分，请假两天加1分。凡迟到早退2次及以上、无故缺勤等异常情况不加分。',
+      '一周内全勤加3分，请假一天加2分，请假两天加1分。凡迟到早退2次及以上、无故缺勤等异常情况不加分。' +
+      '晚修考勤加分单独统计，不计入总积分。',
   },
   {
     title: '2、课堂表现加分',
@@ -108,6 +115,7 @@ function confirm(content, title) {
 }
 
 module.exports = {
+  recordTypeLabel,
   SCORE_TYPES,
   SCORE_TYPE_LABELS,
   REWARD_TYPES,

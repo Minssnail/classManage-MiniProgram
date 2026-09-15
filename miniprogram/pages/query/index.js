@@ -83,7 +83,7 @@ Page({
       this.setData({
         records: res.records.map((r) => ({
           ...r,
-          typeLabel: util.SCORE_TYPE_LABELS[r.scoreType] || r.scoreType,
+          typeLabel: util.recordTypeLabel(r),
           timeText: util.formatDateTime(r.timestamp),
           studentText: util.displayStudent(r.studentName, r.studentId),
         })),

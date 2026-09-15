@@ -250,3 +250,40 @@
   line-height: 1.7;
   padding: 0 0 24rpx;
 }
+
+/* 晚修加分：单独统计，不计入总积分，弱化显示以免被当成总分的一部分 */
+.night-score {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 21rpx;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.night-card {
+  padding-top: 24rpx;
+  padding-bottom: 24rpx;
+}
+
+.night-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.night-title {
+  font-size: 27rpx;
+  font-weight: 500;
+}
+
+.night-value {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.night-sub {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: var(--text-muted);
+}

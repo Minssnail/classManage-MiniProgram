@@ -15,6 +15,8 @@ Page({
     bars: [],
     maxValue: 0,
     totalWeek: 0,
+    nightWeek: 0,
+    nightTotal: 0,
     typeBars: [],
     loaded: false,
   },
@@ -56,6 +58,9 @@ Page({
         })),
         maxValue: max,
         totalWeek: trend.values.reduce((sum, v) => sum + v, 0),
+        // 晚修加分不进趋势与占比，只在底部注明（老版本云函数没有这两个字段）
+        nightWeek: (trend.nightValues || []).reduce((sum, v) => sum + v, 0),
+        nightTotal: overview.nightStats ? overview.nightStats.total : 0,
         typeBars: this.buildTypeBars(overview.scoreTypeStats),
         loaded: true,
       });
