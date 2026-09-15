@@ -26,13 +26,41 @@ function stopRefresh() {
   wx.stopPullDownRefresh();
 }
 
+function labelOf(session) {
+  const found = SESSIONS.find((x) => x.key === session);
+  return found ? found.label : session;
+}
+
+/**
+ * 把一个人两场的状态整理成界面要的样子。
+ * 走读生不参加晚修：required 为 false，既不算进「已打 / 应打」，也不显示「未打卡」。
+ */
+function decorateSessions(sessions) {
+  const list = (sessions || []).map((x) => ({
+    ...x,
+    required: x.required !== false,
+    timeText: util.formatDateTime(x.timestamp),
+    stateText: x.checkedIn ? util.formatDateTime(x.timestamp) : x.required === false ? '走读生无需打卡' : '未打卡',
+  }));
+  const required = list.filter((x) => x.required);
+  return {
+    sessions: list,
+    requiredCount: required.length,
+    doneCount: required.filter((x) => x.checkedIn).length,
+    allDone: required.length > 0 && required.every((x) => x.checkedIn),
+  };
+}
+
 Page({
   data: {
+    // 三种身份：教师出码并补录；班长协助出码、本人免扫码打卡、看名单；普通学生扫码
     isTeacher: false,
+    isMonitor: false,
+    monitorTab: 'present', // present 出示考勤码 / mine 我的打卡
     readonly: false,
     className: '',
 
-    // 教师端
+    // 出码（教师与班长共用）
     sessions: SESSIONS,
     session: 'day',
     sessionLabel: '面授课',
@@ -45,33 +73,62 @@ Page({
     checkins: [],
     todaySummary: null,
 
+    // 班长本人在当前场次的状态
+    selfChecking: false,
+    myRow: null,
+
     // 学生端
     myStatus: null,
     scanning: false,
   },
 
   async onShow() {
-    const user = await app.requireUser();
-    if (!user) return;
+    const cached = await app.requireUser();
+    if (!cached) return;
+    // 教师可能刚给这个学生设了或撤了班长，每次进来重新拉一次身份。
+    // 要区分两种情况：服务端明确说没登录（比如密码被重置、解了绑）就回登录页；
+    // 只是请求失败（网络抖动）就沿用缓存——权限最终仍以服务端逐次校验为准
+    let user = cached;
+    try {
+      const res = await api.call('auth.me', {}, { silent: true, loading: false });
+      if (!res.user) {
+        app.globalData.user = null;
+        wx.reLaunch({ url: '/pages/login/index' });
+        return;
+      }
+      user = res.user;
+      app.globalData.user = user;
+    } catch (e) {
+      // 沿用缓存
+    }
     await app.loadCurrentSemester();
 
     await app.loadClasses();
     const readonly = app.isReadonlyBrowsing();
     const className = app.effectiveClassName() || '';
-    // 切换班级后，之前那个班的二维码就不该继续展示了
-    const changed = this.data.className && this.data.className !== className;
+    const isTeacher = user.role === 'teacher';
+    const isMonitor = !isTeacher && !!user.canAssistAttendance;
+
+    // 切换班级或卸任班长后，之前那张二维码就不该继续展示了
+    const changed =
+      (this.data.className && this.data.className !== className) ||
+      (this.data.isMonitor && !isMonitor);
     this.setData({
-      isTeacher: user.role === 'teacher',
+      isTeacher,
+      isMonitor,
       readonly,
       className,
       code: changed ? null : this.data.code,
       checkins: changed ? [] : this.data.checkins,
     });
+    if (changed) this.stopTimers();
 
     if (readonly) return;
-    if (user.role === 'teacher') {
+    if (isTeacher || isMonitor) {
       await this.loadTodaySummary();
       this.startTimers();
+      // 从别的页面回来时画布是新挂载的，要重画
+      if (this.data.code && this.onPresentTab()) this.renderQrCode(this.data.code.content);
     } else {
       await this.loadMyStatus();
     }
@@ -86,29 +143,48 @@ Page({
   },
 
   onPullDownRefresh() {
-    const task = this.data.isTeacher ? this.loadTodaySummary() : this.loadMyStatus();
+    const task =
+      this.data.isTeacher || this.data.isMonitor ? this.loadTodaySummary() : this.loadMyStatus();
     task.then(stopRefresh, stopRefresh);
   },
 
+  // 教师始终在出码界面；班长要看当前是不是在「出示考勤码」页签
+  onPresentTab() {
+    return this.data.isTeacher || (this.data.isMonitor && this.data.monitorTab === 'present');
+  },
+
+  onMonitorTab(e) {
+    const tab = e.currentTarget.dataset.tab;
+    if (tab === this.data.monitorTab) return;
+    this.setData({ monitorTab: tab }, () => {
+      // 切回出码页签时画布重新挂载，二维码要重画一遍
+      if (tab === 'present' && this.data.code && this.data.remaining > 0) {
+        setTimeout(() => this.renderQrCode(this.data.code.content), 50);
+      }
+    });
+  },
+
   // ============================================================
-  // 教师端：生成短效二维码
+  // 出码：教师与班长
   // ============================================================
 
   // 切换场次：面授课与晚修各自出码，切换时当前这张码就不该继续展示
   onSession(e) {
     const key = e.currentTarget.dataset.key;
     if (key === this.data.session) return;
-    const found = SESSIONS.find((x) => x.key === key);
     this.stopTimers();
     this.setData(
       {
         session: key,
-        sessionLabel: found ? found.label : key,
+        sessionLabel: labelOf(key),
         code: null,
         checkins: [],
         remaining: 0,
       },
-      () => this.loadTodaySummary()
+      () => {
+        this.refreshMyRow();
+        this.loadTodaySummary();
+      }
     );
   },
 
@@ -125,6 +201,7 @@ Page({
     this.setData({ generating: true });
     try {
       const ttl = TTL_OPTIONS[this.data.ttlIndex].value;
+      // 班长传不传班级都一样，服务端会强制为本班
       const code = await api.call(
         'attendance.createCode',
         { ttl, className: this.data.className, session: this.data.session },
@@ -151,6 +228,11 @@ Page({
   // 在 Canvas 2D 上绘制二维码
   renderQrCode(content) {
     return new Promise((resolve) => {
+      // 班长切到「我的打卡」时画布不在页面上，自动刷新出的新码等切回来再画
+      if (!this.onPresentTab()) {
+        resolve();
+        return;
+      }
       wx.createSelectorQuery()
         .in(this)
         .select('#qrcanvas')
@@ -203,13 +285,13 @@ Page({
     }
   },
 
-  // 轮询当前二维码的扫码情况，教师可实时看到谁已打卡
+  // 轮询当前二维码的扫码情况，实时看到谁已打卡
   async pollCodeStatus() {
     if (!this.data.code) return;
     try {
       const res = await api.call(
         'attendance.codeStatus',
-        { codeId: this.data.code.codeId },
+        { codeId: this.data.code.codeId, className: this.data.className },
         { loading: false, silent: true }
       );
       const checkins = res.checkins.map((c) => ({
@@ -228,7 +310,10 @@ Page({
   async onRevoke() {
     if (!this.data.code) return;
     try {
-      await api.call('attendance.revokeCode', { codeId: this.data.code.codeId });
+      await api.call('attendance.revokeCode', {
+        codeId: this.data.code.codeId,
+        className: this.data.className,
+      });
       this.setData({ code: null, remaining: 0, autoRefresh: false });
       this.stopTimers();
     } catch (e) {
@@ -244,23 +329,63 @@ Page({
         { loading: false }
       );
       // WXML 里按场次取值不方便，这里摊平成两个字段
-      const pick = (st, key) => (st.sessions || []).find((x) => x.session === key) || { checkedIn: false };
-      this.setData({
-        todaySummary: {
-          ...summary,
-          students: (summary.students || []).map((st) => ({
-            ...st,
-            dayState: pick(st, 'day'),
-            nightState: pick(st, 'night'),
-          })),
-        },
-      });
+      const pick = (st, key) =>
+        (st.sessions || []).find((x) => x.session === key) || { checkedIn: false, required: true };
+      const students = (summary.students || []).map((st) => ({
+        ...st,
+        // 老版本云函数没有 rowKey 时退回学号
+        rowKey: st.rowKey || st.studentId,
+        idText: st.studentIdAssigned
+          ? st.studentId
+          : '待分配学号' + (st.phone ? ' · ' + st.phone : ''),
+        dayState: pick(st, 'day'),
+        nightState: pick(st, 'night'),
+      }));
+      this.setData({ todaySummary: { ...summary, students } }, () => this.refreshMyRow());
     } catch (e) {
       // 错误提示已在 api 层弹出
     }
   },
 
-  // 教师补录：学生忘带手机等特殊情况
+  /**
+   * 班长的名单里包含自己：从中取出本人两场的状态，
+   * 既用于出码页签上的「本人打卡」按钮，也用于「我的打卡」页签。
+   */
+  refreshMyRow() {
+    if (!this.data.isMonitor || !this.data.todaySummary) return;
+    const me = app.globalData.user;
+    const row = this.data.todaySummary.students.find((s) => me && s.studentId === me.studentId);
+    if (!row) {
+      this.setData({ myRow: null, myStatus: null });
+      return;
+    }
+    const current = this.data.session === 'night' ? row.nightState : row.dayState;
+    this.setData({
+      myRow: {
+        lodgingLabel: row.lodgingLabel,
+        currentRequired: current.required !== false,
+        currentDone: !!current.checkedIn,
+      },
+      myStatus: { day: this.data.todaySummary.day, ...decorateSessions(row.sessions) },
+    });
+  },
+
+  // 班长出码时自己的手机正显示二维码，没法再扫，所以给个按钮。服务端要求这一场正有有效的码
+  async onSelfCheckin() {
+    if (this.data.selfChecking) return;
+    this.setData({ selfChecking: true });
+    try {
+      const res = await api.call('attendance.selfCheckin', { session: this.data.session });
+      util.toast(res.message, 'success');
+      await this.loadTodaySummary();
+    } catch (e) {
+      // 错误提示已在 api 层弹出
+    } finally {
+      this.setData({ selfChecking: false });
+    }
+  },
+
+  // 教师补录：学生忘带手机等特殊情况。班长没有这个权限
   async onManualCheckin(e) {
     const studentId = String(e.currentTarget.dataset.id || '').trim();
     const session = String(e.currentTarget.dataset.session || this.data.session);
@@ -268,8 +393,7 @@ Page({
       util.toast('缺少学号');
       return;
     }
-    const label = (SESSIONS.find((x) => x.key === session) || {}).label || session;
-    const ok = await util.confirm(`确认为该学生补录今日${label}考勤吗？`, '补录考勤');
+    const ok = await util.confirm(`确认为该学生补录今日${labelOf(session)}考勤吗？`, '补录考勤');
     if (!ok) return;
     try {
       const res = await api.call('attendance.manualCheckin', { studentId, session });
@@ -288,19 +412,10 @@ Page({
     try {
       const status = await api.call('attendance.today', {}, { loading: false });
       // 兼容旧版云函数：没有 sessions 时退回单场次（面授）
-      const sessions = (status.sessions || [
+      const sessions = status.sessions || [
         { session: 'day', sessionLabel: '面授课', checkedIn: status.checkedIn, timestamp: status.timestamp },
-      ]).map((x) => ({ ...x, timeText: util.formatDateTime(x.timestamp) }));
-      this.setData({
-        myStatus: {
-          ...status,
-          sessions,
-          // 两场都打完了才没得可打
-          allDone: sessions.every((x) => x.checkedIn),
-          doneCount: sessions.filter((x) => x.checkedIn).length,
-          timeText: util.formatDateTime(status.timestamp),
-        },
-      });
+      ];
+      this.setData({ myStatus: { day: status.day, ...decorateSessions(sessions) } });
     } catch (e) {
       // 错误提示已在 api 层弹出
     }
@@ -347,7 +462,8 @@ Page({
         content: res.message,
         showCancel: false,
       });
-      await this.loadMyStatus();
+      if (this.data.isMonitor) await this.loadTodaySummary();
+      else await this.loadMyStatus();
     } catch (e) {
       // 错误提示已在 api 层弹出
     } finally {

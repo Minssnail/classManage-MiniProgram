@@ -3,7 +3,7 @@
     <view class="avatar">{{isTeacher ? '师' : '生'}}</view>
     <view class="info">
       <view class="name">{{displayName}}</view>
-      <view class="role">{{isTeacher ? '教师' : '学生'}} · {{semesterLabel}}</view>
+      <view class="role">{{roleLabel}} · {{semesterLabel}}</view>
     </view>
     <view class="score" wx:if="{{!isTeacher && myTotalScore !== null}}">
       <view class="score-value">{{myTotalScore}}</view>

@@ -17,6 +17,12 @@ Page({
     majors: [],
     pendingCount: 0,
     loaded: false,
+
+    // 身份：班委角色与住宿情况
+    roles: [],
+    lodgings: [],
+    editing: null, // { studentId, name, lodging, picked: { key: true } }
+    savingIdentity: false,
   },
 
   async onShow() {
@@ -29,11 +35,11 @@ Page({
     }
     await Promise.all([app.loadCurrentSemester(), app.loadClasses()]);
     this.setData({ className: app.effectiveClassName() || '' });
-    await this.loadStudents();
+    await Promise.all([this.loadStudents(), this.loadRoles()]);
   },
 
   onPullDownRefresh() {
-    this.loadStudents().then(stopRefresh, stopRefresh);
+    Promise.all([this.loadStudents(), this.loadRoles()]).then(stopRefresh, stopRefresh);
   },
 
   onInput(e) {
@@ -57,6 +63,8 @@ Page({
         subLabel: s.phone || (s.studentIdAssigned ? '' : s.studentId),
         // 单独绑定过规则的标出来，其余沿用班级默认
         ruleLabel: s.ruleName ? s.ruleName + (s.ownRuleCode ? '（单独指定）' : '') : '未绑定专业规则',
+        cadreRoleNames: s.cadreRoleNames || [],
+        lodgingLabel: s.lodgingLabel || '住宿生',
       }));
       this.setData({
         students,
@@ -189,6 +197,115 @@ Page({
         }
       },
     });
+  },
+
+  // ============================================================
+  // 身份：班委角色与住宿情况
+  // ============================================================
+
+  async loadRoles() {
+    try {
+      const res = await api.call('role.list', {}, { loading: false, silent: true });
+      this.setData({ roles: res.roles || [], lodgings: res.lodgings || [] });
+    } catch (e) {
+      // 老版本云函数没有这个接口时，身份设置入口不可用但不影响其余功能
+    }
+  },
+
+  onOpenIdentity(e) {
+    const key = e.currentTarget.dataset.key;
+    const s = this.data.students.find((x) => x.studentId === key);
+    if (!s) return;
+    if (!this.data.roles.length) {
+      util.toast('角色列表加载失败，请下拉刷新重试');
+      return;
+    }
+    const picked = {};
+    for (const k of s.cadreRoles || []) picked[k] = true;
+    this.setData({
+      editing: { studentId: s.studentId, name: s.name, lodging: s.lodging || 'boarding', picked },
+    });
+  },
+
+  onCloseIdentity() {
+    if (this.data.savingIdentity) return;
+    this.setData({ editing: null });
+  },
+
+  // 弹层内部的点击不要冒泡到遮罩上把弹层关掉
+  noop() {},
+
+  onPickLodging(e) {
+    this.setData({ 'editing.lodging': e.currentTarget.dataset.key });
+  },
+
+  onToggleRole(e) {
+    const key = e.currentTarget.dataset.key;
+    this.setData({ ['editing.picked.' + key]: !this.data.editing.picked[key] });
+  },
+
+  async onSaveIdentity() {
+    const editing = this.data.editing;
+    if (!editing || this.data.savingIdentity) return;
+    const cadreRoles = this.data.roles.filter((r) => editing.picked[r.key]).map((r) => r.key);
+
+    this.setData({ savingIdentity: true });
+    try {
+      const res = await api.call('student.setIdentity', {
+        studentId: editing.studentId,
+        lodging: editing.lodging,
+        cadreRoles,
+      });
+      util.toast(res.message, 'success');
+      this.setData({ editing: null });
+      await Promise.all([this.loadStudents(), this.loadRoles()]);
+    } catch (err) {
+      // 错误提示已在 api 层弹出
+    } finally {
+      this.setData({ savingIdentity: false });
+    }
+  },
+
+  // 班长以外的角色目前只是身份标识，可按学校实际情况补充
+  onAddRole() {
+    wx.showModal({
+      title: '添加班委角色',
+      editable: true,
+      placeholderText: '如：生活委员、体育委员',
+      success: async (res) => {
+        if (!res.confirm) return;
+        const name = String(res.content || '').trim();
+        if (!name) return;
+        try {
+          const out = await api.call('role.add', { name });
+          util.toast(out.message, 'success');
+          await this.loadRoles();
+        } catch (err) {
+          // 错误提示已在 api 层弹出
+        }
+      },
+    });
+  },
+
+  async onRemoveRole(e) {
+    const { key, name, count } = e.currentTarget.dataset;
+    if (Number(count) > 0) {
+      wx.showModal({
+        title: '无法删除',
+        content: `还有 ${count} 名学生担任「${name}」，请先在下方名单里取消他们的这个角色。`,
+        showCancel: false,
+      });
+      return;
+    }
+    const ok = await util.confirm(`确定删除角色「${name}」吗？`, '删除角色');
+    if (!ok) return;
+    try {
+      const out = await api.call('role.remove', { key });
+      util.toast(out.message, 'success');
+      await this.loadRoles();
+    } catch (err) {
+      // 错误提示已在 api 层弹出
+    }
   },
 
   onOpenPrivacy(e) {

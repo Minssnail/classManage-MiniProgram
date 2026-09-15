@@ -38,6 +38,115 @@
   margin-bottom: 10rpx;
 }
 
+/* ---------- 班委角色 ---------- */
+.role-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+
+.role-chip {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 10rpx 20rpx;
+  border-radius: 999rpx;
+  background: #f1f3f7;
+  font-size: 25rpx;
+}
+
+.role-chip.monitor {
+  background: var(--brand-light);
+  color: var(--brand);
+}
+
+.role-count {
+  font-size: 21rpx;
+  color: var(--text-muted);
+}
+
+.role-del {
+  margin-left: 4rpx;
+  color: var(--text-muted);
+  font-size: 30rpx;
+  line-height: 1;
+}
+
+.card-title .link {
+  color: var(--brand);
+}
+
+.id-badge {
+  margin-left: 10rpx;
+  vertical-align: middle;
+}
+
+/* ---------- 设置身份弹层 ---------- */
+.sheet-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(15, 20, 30, 0.45);
+  display: flex;
+  align-items: flex-end;
+  z-index: 100;
+}
+
+.sheet {
+  width: 100%;
+  background: #fff;
+  border-radius: 28rpx 28rpx 0 0;
+  padding: 36rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.sheet-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  margin-bottom: 28rpx;
+}
+
+.sheet-label {
+  font-size: 25rpx;
+  color: var(--text-muted);
+  margin: 18rpx 0 14rpx;
+}
+
+.sheet-note {
+  font-size: 22rpx;
+  margin-top: 10rpx;
+}
+
+.option-row {
+  display: flex;
+  gap: 16rpx;
+}
+
+.option-row.wrap {
+  flex-wrap: wrap;
+}
+
+.option {
+  padding: 16rpx 30rpx;
+  border-radius: 14rpx;
+  border: 2rpx solid var(--border);
+  font-size: 26rpx;
+  color: var(--text);
+}
+
+.option.on {
+  border-color: var(--brand);
+  background: var(--brand-light);
+  color: var(--brand);
+  font-weight: 500;
+}
+
+.sheet-actions {
+  margin-top: 36rpx;
+}
+
 .privacy-note {
   font-size: 22rpx;
   color: var(--text-muted);

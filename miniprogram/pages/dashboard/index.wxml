@@ -95,11 +95,11 @@
       积分排行榜
       <text class="sub">共 {{ranking.length}} 人</text>
     </view>
-    <view wx:for="{{ranking}}" wx:key="studentId" class="list-item">
+    <view wx:for="{{ranking}}" wx:key="rowKey" class="list-item">
       <view class="rank rank-{{index < 3 ? index + 1 : 'n'}}">{{index + 1}}</view>
       <view class="main">
         <view class="title">{{item.name}}</view>
-        <view class="desc">{{item.studentId}} · {{item.className}}</view>
+        <view class="desc">{{item.studentIdAssigned ? item.studentId : '待分配学号'}} · {{item.className}}</view>
       </view>
       <view class="aside">
         <text class="badge badge-success">{{item.totalScore}} 分</text>

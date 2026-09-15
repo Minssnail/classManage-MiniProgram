@@ -27,6 +27,8 @@ const COLLECTIONS = [
   'courses',
   'examScores',
   'retakeSelections',
+  'cadreRoles',
+  'snapshotLogs',
 ];
 
 const SCORE_TYPES = ['attendance', 'homework', 'exam', 'activity', 'other'];
@@ -116,9 +118,14 @@ function verifyPassword(password, salt, hash) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function publicUser(user, student) {
+function publicUser(user, student, roles) {
   if (!user) return null;
+  const identity =
+    user.role === 'student' && student ? describeIdentity(student, roles || BUILTIN_ROLES) : null;
   return {
+    ...(identity || {}),
+    // 小程序只看这一个开关决定要不要展示出码入口，具体权限仍由服务端逐次校验
+    canAssistAttendance: user.role === 'teacher' || !!(identity && identity.isMonitor),
     _id: user._id,
     username: user.username,
     role: user.role,
@@ -211,6 +218,28 @@ async function semesterMap() {
   const map = {};
   for (const s of semesters) map[s._id] = s;
   return map;
+}
+
+/**
+ * 新生没分配学号时，studentId 与登录名存的都是手机号。
+ *
+ * 这两个字段发给教师以外的人时必须换掉：否则排行榜上会把同学的「学号」一栏
+ * 直接显示成手机号，积分记录的「操作员」也是——而隐私政策承诺手机号
+ * 仅任课教师可见、不向同学展示。自己的记录不受影响。
+ */
+function visibleStudentId(viewer, students, rawId) {
+  if (!rawId) return rawId || null;
+  if (viewer && viewer.role === 'teacher') return rawId;
+  if (viewer && viewer.studentId === rawId) return rawId;
+  const s = students[rawId];
+  return s && s.studentIdAssigned === false ? null : rawId;
+}
+
+// 学生本人触发的记录（扫码打卡等）操作员就是其登录名，对同学显示姓名即可
+function visibleOperator(viewer, students, operator) {
+  if (!operator || (viewer && viewer.role === 'teacher')) return operator;
+  const s = students[operator];
+  return s ? s.name || '同学' : operator;
 }
 
 function decorate(records, students, semesters) {
@@ -554,14 +583,14 @@ actions['auth.login'] = async ({ payload, openid }) => {
   }
   await db.collection('users').doc(user._id).update({ data: { openid, lastLoginAt: new Date() } });
 
-  const students = await studentMap();
-  return { user: publicUser(user, students[user.studentId]) };
+  const [students, roles] = await Promise.all([studentMap(), listRoles()]);
+  return { user: publicUser(user, students[user.studentId], roles) };
 };
 
 actions['auth.me'] = async ({ user }) => {
   if (!user) return { user: null };
-  const students = await studentMap();
-  return { user: publicUser(user, students[user.studentId]) };
+  const [students, roles] = await Promise.all([studentMap(), listRoles()]);
+  return { user: publicUser(user, students[user.studentId], roles) };
 };
 
 actions['auth.logout'] = async ({ user }) => {
@@ -615,12 +644,24 @@ actions['student.list'] = async ({ user, payload }) => {
   }
   const majorByRule = {};
   for (const m of majors) majorByRule[m.ruleCode] = m;
+  const roles = await listRoles();
+  const isTeacher = user.role === 'teacher';
+  const studentIndex = {};
+  for (const s of students) studentIndex[s.studentId] = s;
 
   return {
     students: students.map((s) => {
       const rule = resolver.ruleOf(s.studentId);
+      // 隐私政策承诺手机号「仅任课教师可见，不向同学展示」。
+      // 小程序里调这个接口的页面都限教师，但接口本身只校验了登录，
+      // 学生直接调用就能拿到全班手机号，所以在服务端剔掉
+      const { phone, ...rest } = s;
       return {
-        ...s,
+        ...rest,
+        ...(isTeacher ? { phone: phone || null } : {}),
+        studentId: isTeacher ? s.studentId : visibleStudentId(user, studentIndex, s.studentId),
+        rowKey: s._id,
+        ...describeIdentity(s, roles),
         totalScore: totals[s.studentId] || 0,
         studentIdAssigned: s.studentIdAssigned !== false,
         // 学生自己绑定的规则，为空表示沿用班级默认
@@ -1093,10 +1134,211 @@ actions['score.list'] = async ({ user, payload }) => {
   const records = all.filter((r) => scope.match(r));
   const limited = records.slice(0, Number(payload.limit) || 200);
   const [students, semesters] = [await studentMap(), await semesterMap()];
+  const decorated = decorate(limited, students, semesters);
   return {
-    records: decorate(limited, students, semesters),
+    records:
+      user.role === 'teacher'
+        ? decorated
+        : decorated.map((r) => ({
+            ...r,
+            studentId: visibleStudentId(user, students, r.studentId),
+            operator: visibleOperator(user, students, r.operator),
+          })),
     total: records.length,
     className: scope.className,
+  };
+};
+
+// ============================================================
+// 学生身份：班委角色与住宿情况
+// ============================================================
+
+/**
+ * 住宿情况决定要不要参加晚修：住宿生要打晚修卡，走读生不用。
+ * 升级前的学生没有这个字段，按住宿生处理——这样老数据的晚修考勤行为不变，
+ * 由教师逐个把走读生标出来，而不是一升级全班晚修都悄悄免掉了。
+ */
+const LODGING_LABELS = { boarding: '住宿生', commuting: '走读生' };
+const DEFAULT_LODGING = 'boarding';
+
+/**
+ * 内置班委角色。key 一经发布就不能改：学生身上存的是 key，改名只改 name。
+ * 目前只有班长带额外权限（协助出考勤码、本人免扫码打卡、看今日名单），
+ * 其余角色与教师后续补充的角色都只是身份标识。
+ */
+const MONITOR_ROLE = 'monitor';
+const BUILTIN_ROLES = [
+  { key: MONITOR_ROLE, name: '班长', builtin: true, order: 1 },
+  { key: 'study', name: '学习委员', builtin: true, order: 2 },
+  { key: 'psych', name: '心理委员', builtin: true, order: 3 },
+];
+
+function lodgingOf(student) {
+  const v = student && student.lodging;
+  return LODGING_LABELS[v] ? v : DEFAULT_LODGING;
+}
+
+function isBoarder(student) {
+  return lodgingOf(student) === 'boarding';
+}
+
+function rolesOf(student) {
+  return Array.isArray(student && student.cadreRoles) ? student.cadreRoles : [];
+}
+
+// 内置角色在前，教师补充的按添加顺序排在后面
+async function listRoles() {
+  let custom = [];
+  try {
+    custom = await fetchAll(db.collection('cadreRoles'));
+  } catch (e) {
+    custom = [];
+  }
+  const extra = custom
+    .map((r) => ({ key: r.key, name: r.name, builtin: false, order: 100 + (r.seq || 0), _id: r._id }))
+    .sort((a, b) => a.order - b.order);
+  return BUILTIN_ROLES.concat(extra);
+}
+
+function describeIdentity(student, roles) {
+  const byKey = {};
+  for (const r of roles) byKey[r.key] = r;
+  const keys = rolesOf(student).filter((k) => byKey[k]);
+  const lodging = lodgingOf(student);
+  return {
+    cadreRoles: keys,
+    cadreRoleNames: keys.map((k) => byKey[k].name),
+    isCadre: keys.length > 0,
+    isMonitor: keys.indexOf(MONITOR_ROLE) >= 0,
+    lodging,
+    lodgingLabel: LODGING_LABELS[lodging],
+    // 没存过这个字段的，界面上提示教师「未确认，按住宿生处理」
+    lodgingConfirmed: !!(student && LODGING_LABELS[student.lodging]),
+  };
+}
+
+/**
+ * 考勤管理人：教师，或本班班长。
+ * 班长的班级一律取自己所在班，请求里传别的班也无效——否则班长能给别班出码。
+ */
+async function requireAttendanceStaff(user, payload) {
+  requireLogin(user);
+  if (user.role === 'teacher') {
+    return {
+      isTeacher: true,
+      isMonitor: false,
+      student: null,
+      className: String((payload && payload.className) || '').trim() || null,
+    };
+  }
+  const res = await db.collection('students').where({ studentId: user.studentId }).limit(1).get();
+  const student = res.data[0];
+  if (!student || rolesOf(student).indexOf(MONITOR_ROLE) < 0) {
+    fail('需要教师或班长权限');
+  }
+  return { isTeacher: false, isMonitor: true, student, className: student.className || null };
+}
+
+// 班长只能操作本班的考勤码
+function assertCodeInScope(staff, code) {
+  if (staff.isTeacher) return;
+  if (!code || code.className !== staff.className) fail('只能管理本班的考勤码');
+}
+
+actions['role.list'] = async ({ user }) => {
+  requireLogin(user);
+  const roles = await listRoles();
+  // 统计每个角色当前有几人担任，教师删角色前能看到
+  const students = await fetchAll(db.collection('students'));
+  const counts = {};
+  for (const s of students) for (const k of rolesOf(s)) counts[k] = (counts[k] || 0) + 1;
+  return {
+    roles: roles.map((r) => ({
+      key: r.key,
+      name: r.name,
+      builtin: r.builtin,
+      holderCount: counts[r.key] || 0,
+    })),
+    lodgings: Object.keys(LODGING_LABELS).map((k) => ({ key: k, name: LODGING_LABELS[k] })),
+    defaultLodging: DEFAULT_LODGING,
+  };
+};
+
+actions['role.add'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const name = String(payload.name || '').trim();
+  if (!name) fail('角色名称不能为空');
+  if (name.length > 10) fail('角色名称不能超过 10 个字');
+
+  const roles = await listRoles();
+  if (roles.some((r) => r.name === name)) fail('已有同名角色：' + name);
+
+  await ensureCollection('cadreRoles');
+  const key = 'r_' + crypto.randomBytes(4).toString('hex');
+  const seq = roles.filter((r) => !r.builtin).length + 1;
+  await db.collection('cadreRoles').add({
+    data: { key, name, seq, createdBy: user.username, createdAt: new Date() },
+  });
+  return { message: '已添加角色：' + name, role: { key, name, builtin: false, holderCount: 0 } };
+};
+
+actions['role.remove'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const key = String(payload.key || '').trim();
+  if (BUILTIN_ROLES.some((r) => r.key === key)) fail('内置角色不能删除');
+
+  const roles = await listRoles();
+  const role = roles.find((r) => r.key === key);
+  if (!role) fail('角色不存在');
+
+  // 与删班级的规矩一致：还有人担任就不让删，免得学生身上挂着一个找不到名字的角色
+  const holders = (await fetchAll(db.collection('students'))).filter(
+    (s) => rolesOf(s).indexOf(key) >= 0
+  );
+  if (holders.length) {
+    fail(`还有 ${holders.length} 名学生担任「${role.name}」，请先取消他们的这个角色`);
+  }
+  await db.collection('cadreRoles').doc(role._id).remove();
+  return { message: '已删除角色：' + role.name };
+};
+
+// 教师设置学生身份：住宿情况与班委角色，两项都可以只改其一
+actions['student.setIdentity'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const studentId = String(payload.studentId || '').trim();
+  if (!studentId) fail('缺少学号');
+
+  const res = await db.collection('students').where({ studentId }).limit(1).get();
+  const student = res.data[0];
+  if (!student) fail('学生不存在');
+
+  const data = {};
+  if (payload.lodging !== undefined) {
+    const lodging = String(payload.lodging || '').trim();
+    if (!LODGING_LABELS[lodging]) fail('住宿情况无效');
+    data.lodging = lodging;
+  }
+  if (payload.cadreRoles !== undefined) {
+    if (!Array.isArray(payload.cadreRoles)) fail('班委角色格式无效');
+    const roles = await listRoles();
+    const valid = new Set(roles.map((r) => r.key));
+    const keys = [...new Set(payload.cadreRoles.map((k) => String(k)))];
+    const unknown = keys.filter((k) => !valid.has(k));
+    if (unknown.length) fail('角色不存在：' + unknown.join('、'));
+    data.cadreRoles = keys;
+  }
+  if (!Object.keys(data).length) fail('没有要修改的内容');
+
+  await db.collection('students').doc(student._id).update({ data });
+
+  const updated = { ...student, ...data };
+  const identity = describeIdentity(updated, await listRoles());
+  const parts = [identity.lodgingLabel];
+  if (identity.cadreRoleNames.length) parts.push(identity.cadreRoleNames.join('、'));
+  return {
+    message: `${student.name}：${parts.join(' · ')}`,
+    studentId,
+    ...identity,
   };
 };
 
@@ -1104,12 +1346,13 @@ actions['score.list'] = async ({ user, payload }) => {
 
 // 教师生成短效考勤二维码：同一场次同一时刻只保留一个有效码
 actions['attendance.createCode'] = async ({ user, payload }) => {
-  requireTeacher(user);
+  // 班长可协助出码，但班级强制为本班
+  const staff = await requireAttendanceStaff(user, payload);
   let ttl = Number(payload.ttl) || DEFAULT_CODE_TTL;
   ttl = Math.min(MAX_CODE_TTL, Math.max(MIN_CODE_TTL, Math.round(ttl)));
 
-  const className = String(payload.className || '').trim();
-  if (!className) fail('请先选择要考勤的班级');
+  const className = staff.className;
+  if (!className) fail(staff.isTeacher ? '请先选择要考勤的班级' : '你还没有分配班级');
   const session = normalizeSession(payload.session);
 
   const now = new Date();
@@ -1155,10 +1398,11 @@ actions['attendance.createCode'] = async ({ user, payload }) => {
 
 // 教师端查询某个考勤码的实时扫码情况
 actions['attendance.codeStatus'] = async ({ user, payload }) => {
-  requireTeacher(user);
+  const staff = await requireAttendanceStaff(user, payload);
   if (!payload.codeId) fail('缺少考勤码标识');
   const code = await db.collection('attendanceCodes').doc(payload.codeId).get();
   if (!code.data) fail('考勤码不存在');
+  assertCodeInScope(staff, code.data);
 
   const records = await fetchAll(
     db.collection('scoreRecords').where({ codeId: payload.codeId }).orderBy('timestamp', 'desc')
@@ -1173,7 +1417,8 @@ actions['attendance.codeStatus'] = async ({ user, payload }) => {
     expireAt: new Date(code.data.expireAt).getTime(),
     serverNow: now.getTime(),
     checkins: records.map((r) => ({
-      studentId: r.studentId,
+      studentId: visibleStudentId(user, students, r.studentId),
+      rowKey: r._id,
       studentName: students[r.studentId] ? students[r.studentId].name : null,
       timestamp: r.timestamp,
     })),
@@ -1181,8 +1426,11 @@ actions['attendance.codeStatus'] = async ({ user, payload }) => {
 };
 
 actions['attendance.revokeCode'] = async ({ user, payload }) => {
-  requireTeacher(user);
+  const staff = await requireAttendanceStaff(user, payload);
   if (!payload.codeId) fail('缺少考勤码标识');
+  const code = await db.collection('attendanceCodes').doc(payload.codeId).get();
+  if (!code.data) fail('考勤码不存在');
+  assertCodeInScope(staff, code.data);
   await db.collection('attendanceCodes').doc(payload.codeId).update({ data: { revoked: true } });
   return { message: '二维码已失效' };
 };
@@ -1231,6 +1479,9 @@ actions['attendance.checkin'] = async ({ user, payload }) => {
   // 场次取自二维码本身，学生无从选择，扫哪个码就记哪一场
   const session = code.session || DEFAULT_SESSION;
   const label = SESSION_LABELS[session];
+  if (session === 'night' && !isBoarder(student.data[0])) {
+    fail('你是走读生，无需参加晚修打卡');
+  }
 
   const day = beijingDay(now);
   const done = await attendanceOf(user.studentId, day);
@@ -1259,6 +1510,66 @@ actions['attendance.checkin'] = async ({ user, payload }) => {
   };
 };
 
+/**
+ * 班长本人打卡。班长出码时自己的手机正显示着二维码，没法再扫一遍，所以给个按钮。
+ *
+ * 但不能变成「班长随时想打就打」——那就退回到了最初被否掉的学生自助打卡。
+ * 因此要求本班这一场正有一个有效的考勤码（谁出的都行），即考勤确实正在进行，
+ * 打卡记录也挂到这个码上，教师在扫码名单里能看到。
+ */
+actions['attendance.selfCheckin'] = async ({ user, payload }) => {
+  const staff = await requireAttendanceStaff(user, payload);
+  if (staff.isTeacher) fail('教师无需打卡');
+  const me = staff.student;
+  const session = normalizeSession(payload.session);
+  const label = SESSION_LABELS[session];
+
+  if (session === 'night' && !isBoarder(me)) fail('你是走读生，无需参加晚修打卡');
+
+  const now = new Date();
+  const live = (
+    await fetchAll(
+      db.collection('attendanceCodes').where({
+        className: me.className,
+        revoked: _.neq(true),
+        expireAt: _.gt(now),
+      })
+    )
+  ).filter((c) => (c.session || DEFAULT_SESSION) === session);
+  if (!live.length) {
+    fail(`本班当前没有进行中的${label}考勤，请先出示${label}考勤码再打卡`);
+  }
+  // 多个有效码时挂到最新的那个上
+  live.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const code = live[0];
+
+  const day = beijingDay(now);
+  const done = await attendanceOf(me.studentId, day);
+  if (done[session]) fail(`今日${label}已打卡，每人每场次每天只能打卡一次`);
+
+  const record = {
+    studentId: me.studentId,
+    semesterId: code.semesterId || (await currentSemesterId()),
+    scoreType: 'attendance',
+    session,
+    score: 1,
+    reason: label + '班长本人打卡',
+    operator: user.username,
+    timestamp: now,
+    day,
+    codeId: code._id,
+  };
+  const added = await db.collection('scoreRecords').add({ data: record });
+  await db.collection('attendanceCodes').doc(code._id).update({ data: { checkinCount: _.inc(1) } });
+
+  return {
+    message: `${label}打卡成功，考勤加 1 分`,
+    session,
+    sessionLabel: label,
+    record: { _id: added._id, ...record, studentName: me.name },
+  };
+};
+
 // 教师补录打卡（学生忘带手机等情况）
 actions['attendance.manualCheckin'] = async ({ user, payload }) => {
   requireTeacher(user);
@@ -1269,6 +1580,9 @@ actions['attendance.manualCheckin'] = async ({ user, payload }) => {
 
   const student = await db.collection('students').where({ studentId }).limit(1).get();
   if (!student.data.length) fail('学生不存在');
+  if (session === 'night' && !isBoarder(student.data[0])) {
+    fail(`${student.data[0].name}是走读生，无需补录晚修`);
+  }
 
   const now = new Date();
   const day = beijingDay(now);
@@ -1306,19 +1620,33 @@ actions['attendance.today'] = async ({ user, payload }) => {
   // 键为「学号|场次」，升级前没有 session 的记录归入面授
   const byKey = {};
   for (const r of records) byKey[r.studentId + '|' + (r.session || DEFAULT_SESSION)] = r;
-  const stateOf = (studentId, session) => {
-    const r = byKey[studentId + '|' + session];
+  // 走读生不参加晚修：required 为 false，界面显示「走读」而不是「未打卡」
+  const stateOf = (student, session) => {
+    const r = byKey[student.studentId + '|' + session];
     return {
       session,
       sessionLabel: SESSION_LABELS[session],
+      required: session !== 'night' || isBoarder(student),
       checkedIn: !!r,
       timestamp: r ? r.timestamp : null,
       reason: r ? r.reason : null,
     };
   };
 
+  // 班长也看全班名单，但不含手机号
+  let staff = null;
   if (user.role === 'student') {
-    const sessions = ATTENDANCE_SESSIONS.map((x) => stateOf(user.studentId, x));
+    try {
+      staff = await requireAttendanceStaff(user, payload);
+    } catch (e) {
+      staff = null;
+    }
+  }
+
+  if (user.role === 'student' && !staff) {
+    const meRes = await db.collection('students').where({ studentId: user.studentId }).limit(1).get();
+    const me = meRes.data[0] || { studentId: user.studentId };
+    const sessions = ATTENDANCE_SESSIONS.map((x) => stateOf(me, x));
     const day1 = sessions[0];
     return {
       day,
@@ -1330,21 +1658,28 @@ actions['attendance.today'] = async ({ user, payload }) => {
     };
   }
 
-  const className = await resolveClassName(user, payload);
+  const className = staff ? staff.className : await resolveClassName(user, payload);
+  const isTeacher = user.role === 'teacher';
   const list = await fetchAll(
     className
       ? db.collection('students').where({ className }).orderBy('name', 'asc')
       : db.collection('students').orderBy('className', 'asc')
   );
 
+  const listIndex = {};
+  for (const s of list) listIndex[s.studentId] = s;
   const students = list.map((s) => {
-    const sessions = ATTENDANCE_SESSIONS.map((x) => stateOf(s.studentId, x));
+    const sessions = ATTENDANCE_SESSIONS.map((x) => stateOf(s, x));
     return {
-      studentId: s.studentId,
+      studentId: isTeacher ? s.studentId : visibleStudentId(user, listIndex, s.studentId),
+      rowKey: s._id,
       name: s.name,
       className: s.className,
       studentIdAssigned: s.studentIdAssigned !== false,
-      phone: s.phone || null,
+      // 手机号只给教师，班长看名单也拿不到
+      ...(isTeacher ? { phone: s.phone || null } : {}),
+      lodging: lodgingOf(s),
+      lodgingLabel: LODGING_LABELS[lodgingOf(s)],
       sessions,
       checkedIn: sessions[0].checkedIn,
       timestamp: sessions[0].timestamp,
@@ -1353,15 +1688,21 @@ actions['attendance.today'] = async ({ user, payload }) => {
   });
 
   const counts = {};
+  const totals = {};
   for (const x of ATTENDANCE_SESSIONS) {
-    counts[x] = students.filter((s) => s.sessions.find((v) => v.session === x).checkedIn).length;
+    const inScope = students.filter((s) => s.sessions.find((v) => v.session === x).required);
+    totals[x] = inScope.length;
+    counts[x] = inScope.filter((s) => s.sessions.find((v) => v.session === x).checkedIn).length;
   }
 
   return {
     day,
     className,
     total: list.length,
+    // 晚修的应到人数只算住宿生
+    sessionTotals: totals,
     sessionCounts: counts,
+    viewer: isTeacher ? 'teacher' : 'monitor',
     checkedInCount: counts[DEFAULT_SESSION],
     students,
   };
@@ -1505,9 +1846,12 @@ actions['stats.ranking'] = async ({ user, payload }) => {
   const totals = {};
   for (const r of records) totals[r.studentId] = (totals[r.studentId] || 0) + r.score;
 
+  const index = {};
+  for (const s of students) index[s.studentId] = s;
   const ranking = students
     .map((s) => ({
-      studentId: s.studentId,
+      studentId: visibleStudentId(user, index, s.studentId),
+      rowKey: s._id,
       name: s.name,
       className: s.className,
       studentIdAssigned: s.studentIdAssigned !== false,

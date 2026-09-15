@@ -38,7 +38,9 @@ cloudfunctions/
    `{"action": "system.init"}` 并执行。该操作会创建全部数据库集合并写入种子数据，
    **幂等**，不会覆盖已有数据。首次执行（库中还没有任何账号）无需登录态，之后仅教师可执行。
 4. **设置数据库权限**：云开发控制台 → 数据库 → 逐个集合把权限设为
-   **「仅管理端可读写」**（`users` / `students` / `classes` / `semesters` / `scoreRecords` / `rewards` / `attendanceCodes`）。
+   **「仅管理端可读写」**：`users` / `students` / `classes` / `semesters` / `scoreRecords` / `rewards` /
+   `attendanceCodes` / `majors` / `courses` / `examScores` / `retakeSelections` / `cadreRoles` / `snapshotLogs`。
+   后面几个是随功能陆续加的，其中 `examScores` 存的是成绩，尤其不能漏。
    小程序端不直接读写数据库，全部经由云函数，因此关闭客户端权限不影响功能，且能杜绝前端刷分。
 
 初始账号：
@@ -135,6 +137,33 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 「学生自行打卡」的入口已彻底移除：`attendance.checkin` 必须携带有效令牌才会写入考勤记录，
 补录接口 `attendance.manualCheckin` 则要求教师权限。
 
+### 学生身份：班委与住宿
+
+教师在「学生管理」里为每个学生设置身份，两项互相独立：
+
+| 维度 | 取值 | 作用 |
+| --- | --- | --- |
+| 住宿情况 | 住宿生 / 走读生 | 走读生不参加晚修，扫晚修码会被拒，名单上显示「走读」而非「未打卡」，也不计入晚修应到人数 |
+| 班委角色 | 班长、学习委员、心理委员，教师可补充；可多选，不选即普通学生 | 目前只有班长带额外权限，其余角色只作身份标识 |
+
+升级前的学生没有住宿字段，**一律按住宿生处理**——老数据的晚修考勤行为不变，由教师把走读生逐个标出来，
+而不是一升级全班晚修都悄悄免掉了。界面上未确认过的会以 `lodgingConfirmed: false` 区分。
+
+角色以 key 存在学生身上（内置 `monitor` / `study` / `psych`，补充的是 `r_<随机>`），改名不影响已分配的人。
+还有人担任的角色不能删除，与「还有学生的班级不能删除」是同一个规矩。
+
+**班长能做的**（均限本班，请求里传别的班也会被强制改回本班）：
+
+- 出示考勤二维码：与教师同样的出码界面，面授课、晚修都可以；
+- 本人打卡：出码时自己的手机正显示着二维码，没法再扫，所以给一个按钮。
+  但**要求本班这一场正有有效的考勤码**，否则就退回到了最初被否掉的「学生自助打卡」；
+  记录挂到那张码上，教师在扫码名单里看得到；
+- 查看今日考勤名单：姓名、各场次是否已打卡、住宿或走读。
+
+**班长不能做的**：补录考勤（仍只限教师，否则班长能替没来的人打卡）、查看手机号、管理别班的码。
+
+撤掉班长角色后权限立即收回：服务端每次都按当前身份判定，小程序进入考勤页时也会重新拉取身份。
+
 ## 五、待补考与待修读
 
 某门课的历次考试都没及格就计入待补考，**必修选修都算**——挂掉的选修课一样要重修。
@@ -178,7 +207,8 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 集合 | 说明 | 主要字段 |
 | --- | --- | --- |
 | `users` | 账号 | `username`、`phone`、`passwordSalt`、`passwordHash`、`role`、`studentId`、`openid` |
-| `students` | 学生 | `name`、`studentId`、`studentIdAssigned`、`phone`、`className` |
+| `students` | 学生 | `name`、`studentId`、`studentIdAssigned`、`phone`、`className`、`lodging`、`cadreRoles` |
+| `cadreRoles` | 教师补充的班委角色（内置角色不入库） | `key`、`name`、`seq` |
 | `classes` | 班级 | `name`、`createdBy`、`isArchived` |
 | `semesters` | 学期 | `name`、`startDate`、`endDate`、`isCurrent`、`isArchived` |
 | `scoreRecords` | 积分记录 | `studentId`、`semesterId`、`scoreType`、`session`、`score`、`reason`、`operator`、`timestamp`、`day`、`codeId` |
@@ -203,7 +233,8 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 课程成绩 | `academic.import`、`major.list`、`course.list`、`course.todo`、`course.exportTodo`、`exam.list`、`exam.summary`、`exam.pending`、`exam.exportRetake` |
 | 补考选课 | `retake.select`、`retake.submit` |
 | 积分 | `score.add`、`score.list` |
-| 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.manualCheckin`、`attendance.today` |
+| 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.selfCheckin`、`attendance.manualCheckin`、`attendance.today` |
+| 身份 | `role.list`、`role.add`、`role.remove`、`student.setIdentity` |
 | 奖励 | `reward.add`、`reward.list`、`reward.redeem`、`reward.unredeem` |
 | 统计 | `stats.overview`、`stats.ranking`、`stats.trend` |
 | 备份 | `snapshot.run`、`snapshot.status`（定时触发器每周归档到微信 Git 与 Gitee 两处） |
@@ -211,7 +242,13 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 
 权限在服务端判定：教师可管理全部数据；学生可查看**本班**的积分记录（沿用 Web 版的互相监督设定，
 但范围收窄到本班），奖励记录只能看自己的，所有写操作（加分、发奖、建班级、建学期等）一律拒绝。
-学生传入的 `className` 参数会被服务端忽略并强制改回本人所在班级。
+学生传入的 `className` 参数会被服务端忽略并强制改回本人所在班级。班长的额外权限见「学生身份」一节。
+
+**手机号只给教师**：隐私政策承诺手机号「仅任课教师可见，不向同学展示」。要注意的是，
+没分配学号的新生 `studentId` 与登录名存的都是手机号，所以光去掉 `phone` 字段不够——
+发给教师以外的人时，`studentId` 会换成 `null`（另给一个稳定的 `rowKey` 供列表渲染），
+积分记录的操作员换成姓名。本人查看自己的记录不受影响。
+涉及 `student.list`、`score.list`、`stats.ranking`、`attendance.today`、`attendance.codeStatus`。
 
 ## 八、与 Web 版的功能对照
 

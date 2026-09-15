@@ -32,6 +32,32 @@
     </view>
   </view>
 
+  <!-- 班委角色：内置三个，教师可补充 -->
+  <view class="card" wx:if="{{roles.length}}">
+    <view class="card-title">
+      班委角色
+      <text class="sub link" bindtap="onAddRole">＋ 添加角色</text>
+    </view>
+    <view class="role-chips">
+      <view wx:for="{{roles}}" wx:key="key" class="role-chip {{item.key === 'monitor' ? 'monitor' : ''}}">
+        <text>{{item.name}}</text>
+        <text class="role-count">{{item.holderCount}}</text>
+        <text
+          wx:if="{{!item.builtin}}"
+          class="role-del"
+          data-key="{{item.key}}"
+          data-name="{{item.name}}"
+          data-count="{{item.holderCount}}"
+          bindtap="onRemoveRole"
+        >×</text>
+      </view>
+    </view>
+    <view class="muted tip">
+      班长可协助出示考勤二维码、本人免扫码打卡、查看本班今日考勤名单，但不能补录考勤。
+      其余角色目前只作身份标识。住宿生需参加晚修打卡，走读生不需要。
+    </view>
+  </view>
+
   <view class="card">
     <view class="card-title">
       学生名单
@@ -41,7 +67,11 @@
     </view>
     <view wx:for="{{students}}" wx:key="_id" class="list-item">
       <view class="main">
-        <view class="title">{{item.name}}</view>
+        <view class="title">
+          {{item.name}}
+          <text wx:for="{{item.cadreRoleNames}}" wx:for-item="role" wx:key="*this" class="badge {{role === '班长' ? 'badge-brand' : 'badge-muted'}} id-badge">{{role}}</text>
+          <text wx:if="{{item.lodging === 'commuting'}}" class="badge badge-warning id-badge">走读</text>
+        </view>
         <view class="desc">
           <text class="{{item.studentIdAssigned ? '' : 'pending'}}">{{item.idLabel}}</text>
           <text wx:if="{{item.subLabel}}"> · {{item.subLabel}}</text>
@@ -56,6 +86,14 @@
             bindtap="onAssignStudentId"
           >
             补录学号
+          </view>
+          <view
+            wx:if="{{roles.length}}"
+            class="btn btn-ghost btn-sm"
+            data-key="{{item.studentId}}"
+            bindtap="onOpenIdentity"
+          >
+            设置身份
           </view>
           <view
             class="btn btn-plain btn-sm"
@@ -80,5 +118,44 @@
       </view>
     </view>
     <view wx:if="{{loaded && !students.length}}" class="empty">该班级暂无学生</view>
+  </view>
+
+  <!-- 设置身份弹层 -->
+  <view class="sheet-mask" wx:if="{{editing}}" bindtap="onCloseIdentity">
+    <view class="sheet" catchtap="noop">
+      <view class="sheet-title">设置身份 · {{editing.name}}</view>
+
+      <view class="sheet-label">住宿情况</view>
+      <view class="option-row">
+        <view
+          wx:for="{{lodgings}}"
+          wx:key="key"
+          class="option {{editing.lodging === item.key ? 'on' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="onPickLodging"
+        >
+          {{item.name}}
+        </view>
+      </view>
+      <view class="muted sheet-note">走读生无需参加晚修打卡</view>
+
+      <view class="sheet-label">班委角色（可多选，不选即普通学生）</view>
+      <view class="option-row wrap">
+        <view
+          wx:for="{{roles}}"
+          wx:key="key"
+          class="option {{editing.picked[item.key] ? 'on' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="onToggleRole"
+        >
+          <text wx:if="{{editing.picked[item.key]}}">✓ </text>{{item.name}}
+        </view>
+      </view>
+
+      <view class="btn-row sheet-actions">
+        <button class="btn btn-plain" bindtap="onCloseIdentity">取消</button>
+        <button class="btn btn-primary" loading="{{savingIdentity}}" bindtap="onSaveIdentity">保存</button>
+      </view>
+    </view>
   </view>
 </view>

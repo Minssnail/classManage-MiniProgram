@@ -31,6 +31,13 @@ Page({
           ? util.displayStudent(user.name, user.studentId)
           : user.username,
       semesterLabel: semester ? semester.name : '未设置学期',
+      // 学生显示班委角色与住宿情况，班长能从这里知道自己可以协助考勤
+      roleLabel:
+        user.role === 'teacher'
+          ? '教师'
+          : [(user.cadreRoleNames || []).join('、') || '学生', user.lodgingLabel]
+              .filter(Boolean)
+              .join(' · '),
     });
 
     if (user.role === 'student') {
