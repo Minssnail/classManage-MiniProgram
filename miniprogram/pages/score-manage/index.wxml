@@ -5,7 +5,13 @@
       <text class="sub">{{className || '全部班级'}}</text>
     </view>
 
-    <view class="field">
+    <view class="tabs mode-tabs">
+      <view class="tab {{mode === 'single' ? 'active' : ''}}" data-mode="single" bindtap="onMode">单人录入</view>
+      <view class="tab {{mode === 'batch' ? 'active' : ''}}" data-mode="batch" bindtap="onMode">批量选择</view>
+    </view>
+
+    <!-- 单人：输入学号或横向点选 -->
+    <view class="field" wx:if="{{mode === 'single'}}">
       <view class="field-label">学号</view>
       <input class="input" placeholder="输入学号，或点选下方学生" value="{{studentId}}" data-field="studentId" bindinput="onInput" />
       <scroll-view class="student-chips" scroll-x wx:if="{{students.length}}">
@@ -19,6 +25,29 @@
           {{item.name}}
         </view>
       </scroll-view>
+    </view>
+
+    <!-- 批量：全部平铺出来多选 -->
+    <view class="field" wx:else>
+      <view class="pick-head">
+        <text class="field-label">选择学生 <text class="pick-count">已选 {{pickedCount}} / {{students.length}}</text></text>
+        <view class="pick-actions">
+          <text class="link" bindtap="onPickAll">全选</text>
+          <text class="link" bindtap="onPickNone">清空</text>
+        </view>
+      </view>
+      <view class="pick-grid" wx:if="{{students.length}}">
+        <view
+          wx:for="{{students}}"
+          wx:key="_id"
+          class="pick-chip {{picked[item.studentId] ? 'on' : ''}}"
+          data-id="{{item.studentId}}"
+          bindtap="onTogglePick"
+        >
+          <text wx:if="{{picked[item.studentId]}}">✓ </text>{{item.name}}
+        </view>
+      </view>
+      <view wx:else class="muted tip">当前班级没有学生</view>
     </view>
 
     <view class="field">
@@ -39,8 +68,18 @@
       <textarea class="textarea" placeholder="选填，便于日后查证" value="{{reason}}" data-field="reason" bindinput="onInput" />
     </view>
 
-    <button class="btn btn-primary" loading="{{submitting}}" bindtap="onSubmit">确认加分</button>
-    <view class="muted tip">考勤分由学生扫码打卡自动产生，一般无需在此手动录入。</view>
+    <button
+      class="btn btn-primary"
+      loading="{{submitting}}"
+      disabled="{{mode === 'batch' && !pickedCount}}"
+      bindtap="onSubmit"
+    >
+      {{mode === 'batch' ? (pickedCount ? '给 ' + pickedCount + ' 名学生各记分' : '请先勾选学生') : '确认加分'}}
+    </button>
+    <view class="muted tip">
+      考勤分由学生扫码打卡自动产生，一般无需在此手动录入。
+      批量选择时每人各记一条，提交前会列出名单确认；有学号不存在会整批取消，不会只加上一部分人。
+    </view>
   </view>
 
   <view class="card">

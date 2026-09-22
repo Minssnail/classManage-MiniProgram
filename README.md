@@ -235,7 +235,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 学生 | `student.list`、`student.add`、`student.assignStudentId`、`student.resetPassword`、`student.setRule` |
 | 课程成绩 | `academic.import`、`major.list`、`course.list`、`course.todo`、`course.exportTodo`、`exam.list`、`exam.summary`、`exam.pending`、`exam.exportRetake` |
 | 补考选课 | `retake.select`、`retake.submit` |
-| 积分 | `score.add`、`score.list` |
+| 积分 | `score.add`、`score.addBatch`、`score.list` |
 | 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.selfCheckin`、`attendance.manualCheckin`、`attendance.today` |
 | 身份 | `role.list`、`role.add`、`role.remove`、`student.setIdentity` |
 | 奖励 | `reward.add`、`reward.list`、`reward.redeem`、`reward.unredeem` |
@@ -259,7 +259,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | --- | --- | --- |
 | 系统概况 | 概况 tab | 概览卡片、积分类型分布、排行榜、加分说明 |
 | 考勤打卡（学生自助） | 考勤 tab | **改为教师出码 + 学生扫码**，分面授课与晚修两场，另提供教师补录 |
-| 积分管理 | 我的 → 积分管理 | 加分表单支持点选学生，支持负分扣分 |
+| 积分管理 | 我的 → 积分管理 | 加分表单支持点选学生、批量勾选多人一次加分，支持负分扣分 |
 | 学生管理 | 我的 → 学生管理 | 新增学生时同步创建账号，支持无学号的新生与学号补录 |
 | （无） | 我的 → 班级管理 | **新增**：一位教师带多个班级，数据按班级隔离 |
 | 积分查询 / 奖励查询 | 查询 tab | 两个子标签，支持按学号与类型筛选 |

@@ -1101,14 +1101,20 @@ actions['class.importRoster'] = async ({ user, payload }) => {
 
 // ---------- 积分 ----------
 
+// 单人与批量加分共用的校验，免得两边规则分叉
+function parseScoreInput(payload) {
+  const scoreType = String(payload.scoreType || '');
+  const score = Number(payload.score);
+  if (SCORE_TYPES.indexOf(scoreType) < 0) fail('积分类型无效');
+  if (!Number.isFinite(score) || score === 0) fail('分值必须是非零数字');
+  return { scoreType, score, reason: String(payload.reason || '') };
+}
+
 actions['score.add'] = async ({ user, payload }) => {
   requireTeacher(user);
   const studentId = String(payload.studentId || '').trim();
-  const scoreType = String(payload.scoreType || '');
-  const score = Number(payload.score);
   if (!studentId) fail('学号不能为空');
-  if (SCORE_TYPES.indexOf(scoreType) < 0) fail('积分类型无效');
-  if (!Number.isFinite(score) || score === 0) fail('分值必须是非零数字');
+  const { scoreType, score, reason } = parseScoreInput(payload);
 
   const student = await db.collection('students').where({ studentId }).limit(1).get();
   if (!student.data.length) fail('学生不存在');
@@ -1119,13 +1125,73 @@ actions['score.add'] = async ({ user, payload }) => {
     semesterId: payload.semesterId || (await currentSemesterId()),
     scoreType,
     score,
-    reason: String(payload.reason || ''),
+    reason,
     operator: user.username,
     timestamp: now,
     day: beijingDay(now),
   };
   const res = await db.collection('scoreRecords').add({ data: record });
   return { record: { _id: res._id, ...record, studentName: student.data[0].name } };
+};
+
+// 一次最多给多少人加分：一个班够用，也防止误传整个学生表
+const MAX_BATCH_STUDENTS = 200;
+
+/**
+ * 批量加分：同一类型、同一分值、同一理由记给多名学生，每人一条记录。
+ *
+ * 先把所有学号校验完再写——有一个学号不存在就整批拒绝，
+ * 否则写到一半才报错，一部分人加上了、一部分没加，教师很难理清。
+ * 同批记录带同一个 batchId，事后能认出是哪一次操作。
+ */
+actions['score.addBatch'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const { scoreType, score, reason } = parseScoreInput(payload);
+
+  const raw = Array.isArray(payload.studentIds) ? payload.studentIds : [];
+  const ids = [...new Set(raw.map((x) => String(x || '').trim()).filter(Boolean))];
+  if (!ids.length) fail('请至少选择一名学生');
+  if (ids.length > MAX_BATCH_STUDENTS) fail(`一次最多给 ${MAX_BATCH_STUDENTS} 名学生加分`);
+
+  const students = await studentMap();
+  const missing = ids.filter((id) => !students[id]);
+  if (missing.length) fail('以下学号不存在，本次未记任何分：' + missing.join('、'));
+
+  const now = new Date();
+  const base = {
+    semesterId: payload.semesterId || (await currentSemesterId()),
+    scoreType,
+    score,
+    reason,
+    operator: user.username,
+    timestamp: now,
+    day: beijingDay(now),
+    batchId: 'b_' + crypto.randomBytes(6).toString('hex'),
+  };
+
+  const written = [];
+  const failed = [];
+  for (const studentId of ids) {
+    try {
+      const res = await db.collection('scoreRecords').add({ data: { ...base, studentId } });
+      written.push({ _id: res._id, studentId, studentName: students[studentId].name });
+    } catch (e) {
+      // 校验都过了还写失败只可能是数据库出错，明确告诉教师是谁没加上，好单独补
+      failed.push({ studentId, studentName: students[studentId].name });
+    }
+  }
+
+  const names = written.map((w) => w.studentName);
+  return {
+    batchId: base.batchId,
+    count: written.length,
+    records: written,
+    failed,
+    message:
+      `已给 ${written.length} 名学生各记 ${score > 0 ? '+' : ''}${score} 分` +
+      (failed.length ? `，${failed.length} 人写入失败：${failed.map((f) => f.studentName).join('、')}` : ''),
+    names,
+  };
 };
 
 actions['score.list'] = async ({ user, payload }) => {
