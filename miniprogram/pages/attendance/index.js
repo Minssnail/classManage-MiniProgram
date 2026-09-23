@@ -537,7 +537,12 @@ Page({
 
     try {
       if (picked.key === 'checkin') {
-        const res = await api.call('attendance.manualCheckin', { studentId: id, session });
+        // 补的是当前查看的那一天，不是今天
+        const res = await api.call('attendance.manualCheckin', {
+          studentId: id,
+          day: this.data.day || undefined,
+          session,
+        });
         util.toast(res.message, 'success');
       } else {
         const res = await api.call('attendance.mark', {

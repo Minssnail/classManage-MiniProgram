@@ -1681,23 +1681,31 @@ actions['attendance.manualCheckin'] = async ({ user, payload }) => {
   const session = normalizeSession(payload.session);
   const label = SESSION_LABELS[session];
 
+  // 名单可以翻到别的日期补录，补的就是那一天，而不是今天
+  const now = new Date();
+  const today = beijingDay(now);
+  const day = String(payload.day || '').trim() || today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) fail('日期格式不正确');
+  if (day > today) fail('不能补录未来的日期');
+  const dayText = day === today ? '今日' : day;
+
   const student = await db.collection('students').where({ studentId }).limit(1).get();
   if (!student.data.length) fail('学生不存在');
   if (session === 'night' && !isBoarder(student.data[0])) {
     fail(`${student.data[0].name}是走读生，无需补录晚修`);
   }
-  if (await isSuspended(student.data[0].className, beijingDay(), session)) {
-    fail(`今日${label}已停课，无需补录`);
+  if (await isSuspended(student.data[0].className, day, session)) {
+    fail(`${dayText}${label}已停课，无需补录`);
   }
 
-  const now = new Date();
-  const day = beijingDay(now);
   const done = await attendanceOf(studentId, day);
-  if (done[session]) fail(`该学生今日${label}已打卡`);
+  if (done[session]) fail(`该学生${dayText}${label}已打卡`);
 
+  // 补的是哪一天就归到那天所在的学期，免得补往期考勤时记到了当前学期
+  const semester = await findSemesterByDate(day);
   const record = {
     studentId,
-    semesterId: await currentSemesterId(),
+    semesterId: semester ? semester._id : await currentSemesterId(),
     scoreType: 'attendance',
     session,
     score: 1,
@@ -1708,7 +1716,7 @@ actions['attendance.manualCheckin'] = async ({ user, payload }) => {
   };
   const added = await db.collection('scoreRecords').add({ data: record });
   return {
-    message: label + '补录成功',
+    message: (day === today ? '' : day + ' ') + label + '补录成功',
     session,
     sessionLabel: label,
     record: { _id: added._id, ...record, studentName: student.data[0].name },
