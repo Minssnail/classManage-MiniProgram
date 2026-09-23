@@ -224,7 +224,7 @@
         </view>
         <view class="week-bar">
           <text class="link" data-delta="-1" bindtap="onWeekShift">‹ 上一周</text>
-          <text class="muted">共 {{week.sessionTotal}} 场考勤</text>
+          <text class="muted">计入 {{week.countedText}} · 共 {{week.sessionTotal}} 场</text>
           <text class="link" data-delta="1" bindtap="onWeekShift">下一周 ›</text>
         </view>
 
@@ -253,7 +253,9 @@
 
           <view class="muted list-tip">
             一周内全勤加 3 分，请假一天加 2 分、两天加 1 分；迟到早退累计 2 次及以上，或有无故缺勤的不加分。
-            面授课或晚修请假都只算当天请假一次。组织了考勤却没打卡、也没标记的，按无故缺勤计。
+            请假按天算——同一天面授与晚修都请假仍只算一天；迟到早退按次累计。
+            组织了考勤却没打卡、也没标记的，按无故缺勤计。
+            <block wx:if="{{!week.nightCounted}}">本班晚修不计入全勤评定（在「班级管理 → 全勤口径」里设置），晚修打卡仍照常记晚修加分。</block>
           </view>
 
           <button

@@ -166,7 +166,10 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 - **哪天算上课日由考勤码推出来**：当天该场次出过考勤码，就说明这一场确实组织了考勤。
   没出过码的日子（周末、节假日）不计入，不会被判成缺勤；
 - **组织了考勤却没打卡、也没标记的，按无故缺勤计**。教师补录出勤或补标请假后重新结算即可更正；
-- 走读生不参加晚修，晚修那一场不计入他的考勤。
+- 走读生不参加晚修，晚修那一场不计入他的考勤；
+- **哪些场次纳入全勤评定按班设置**（班级管理 → 全勤口径）。有的班晚修虽然也考勤，
+  但不作为全勤评定依据——这时晚修照常打卡、照常拿那 1 分的晚修加分，只是请假缺勤
+  不影响这个班的周加分。没设置过的班两场都算，与之前的行为一致。
 
 结算写的是一条带 `weekKey` 与 `bonusKind: 'weekly'` 的考勤加分记录，计入总积分
 （它没有 `session`，不会被当成晚修那本单独的账）。**可以重复结算**：已发过的按新结果
@@ -268,7 +271,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | --- | --- |
 | 系统 | `system.init`、`system.importLegacy`、`system.legacyStatus` |
 | 认证 | `auth.login`、`auth.me`、`auth.logout`、`auth.changePassword` |
-| 班级 | `class.list`、`class.create`、`class.rename`、`class.remove`、`class.setStartSemester`、`class.importRoster` |
+| 班级 | `class.list`、`class.create`、`class.rename`、`class.remove`、`class.setStartSemester`、`class.setWeeklySessions`、`class.importRoster` |
 | 学生 | `student.list`、`student.add`、`student.assignStudentId`、`student.resetPassword`、`student.setRule` |
 | 课程成绩 | `academic.import`、`major.list`、`course.list`、`course.todo`、`course.exportTodo`、`exam.list`、`exam.summary`、`exam.pending`、`exam.exportRetake` |
 | 补考选课 | `retake.select`、`retake.submit` |

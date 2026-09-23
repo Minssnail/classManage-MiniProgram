@@ -44,7 +44,11 @@ Page({
         api.call('major.list', {}, { loading: false, silent: true }).catch(() => ({ majors: [] })),
       ]);
       this.setData({
-        classes: list,
+        classes: list.map((c) => ({
+          ...c,
+          // 老版本云函数没有这个字段时按两场都计
+          weeklyText: (c.weeklySessionLabels || ['面授课', '晚修']).join('、'),
+        })),
         semesters: semesterRes.semesters || [],
         majors: majorRes.majors || [],
         currentClass: app.globalData.currentClass || '',
@@ -80,6 +84,31 @@ Page({
   },
 
   // 绑定专业规则后，课程信息与成绩查询才知道该用哪套规则版本
+  // 有的班晚修虽然也考勤，但不纳入全勤评定
+  onSetWeeklySessions(e) {
+    const name = e.currentTarget.dataset.name;
+    const options = [
+      { label: '面授课与晚修都计入', sessions: ['day', 'night'] },
+      { label: '只计面授课（晚修不影响全勤）', sessions: ['day'] },
+      { label: '只计晚修', sessions: ['night'] },
+    ];
+    wx.showActionSheet({
+      itemList: options.map((o) => o.label),
+      success: async (res) => {
+        try {
+          const out = await api.call('class.setWeeklySessions', {
+            name,
+            sessions: options[res.tapIndex].sessions,
+          });
+          util.toast(out.message, 'success');
+          await this.loadClasses();
+        } catch (err) {
+          // 错误提示已在 api 层弹出
+        }
+      },
+    });
+  },
+
   onSetRule(e) {
     const name = e.currentTarget.dataset.name;
     const majors = this.data.majors.slice(0, 5);

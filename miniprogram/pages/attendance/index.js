@@ -459,6 +459,7 @@ Page({
         weekStart: week.weekStart,
         week: {
           ...week,
+          countedText: (week.countedSessionLabels || ['面授课', '晚修']).join('、'),
           students: week.students.map((s) => ({
             ...s,
             // 一眼看出这人这周为什么是这个分

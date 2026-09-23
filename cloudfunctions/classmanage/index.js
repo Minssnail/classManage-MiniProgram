@@ -941,6 +941,8 @@ actions['class.list'] = async ({ user, payload }) => {
       c.ruleCode && majorByRule[c.ruleCode]
         ? majorByRule[c.ruleCode].name + ' ' + majorByRule[c.ruleCode].enrollTerm
         : null,
+    weeklySessions: weeklySessionsOf(c),
+    weeklySessionLabels: weeklySessionsOf(c).map((s) => SESSION_LABELS[s]),
     studentCount: counts[c.name] || 0,
     pendingStudentId: pending[c.name] || 0,
   }));
@@ -955,6 +957,8 @@ actions['class.list'] = async ({ user, payload }) => {
       startSemesterName: null,
       ruleCode: null,
       majorName: null,
+      weeklySessions: weeklySessionsOf(null),
+      weeklySessionLabels: weeklySessionsOf(null).map((s) => SESSION_LABELS[s]),
       studentCount: counts[name],
       pendingStudentId: pending[name] || 0,
     });
@@ -1843,6 +1847,20 @@ const WEEKLY_FULL_ATTENDANCE = 3;
 const WEEKLY_LEAVE_POINTS = { 0: 3, 1: 2, 2: 1 };
 const LATE_EARLY_LIMIT = 2;
 
+/**
+ * 哪些场次计入全勤加分，按班设置。
+ *
+ * 有的班晚修虽然也考勤，但不纳入全勤评定——晚修照常打卡、照常拿那 1 分的
+ * 晚修加分，只是请假缺勤不影响这个班的周加分。没设置过的班两场都算，
+ * 与之前的行为一致。
+ */
+function weeklySessionsOf(cls) {
+  const raw = cls && Array.isArray(cls.weeklySessions) ? cls.weeklySessions : null;
+  if (!raw) return ATTENDANCE_SESSIONS.slice();
+  const picked = ATTENDANCE_SESSIONS.filter((s) => raw.indexOf(s) >= 0);
+  return picked.length ? picked : ATTENDANCE_SESSIONS.slice();
+}
+
 function weeklyPoints({ leaveDays, lateEarlyCount, absentDays }) {
   if (absentDays > 0) return { points: 0, reason: '有无故缺勤' };
   if (lateEarlyCount >= LATE_EARLY_LIMIT) {
@@ -1982,6 +2000,9 @@ async function computeWeek(className, weekStartInput, user) {
   const weekStart = weekStartOf(String(weekStartInput || '').trim() || today);
   const days = weekDays(weekStart);
 
+  const cls = await getClassDoc(className);
+  const countedSessions = weeklySessionsOf(cls);
+
   const [students, marks, sessionDays, scores] = await Promise.all([
     fetchAll(db.collection('students').where({ className }).orderBy('name', 'asc')),
     markMap(className, days),
@@ -2010,7 +2031,7 @@ async function computeWeek(className, weekStartInput, user) {
     const absentDaySet = new Set();
 
     for (const day of days) {
-      for (const session of ATTENDANCE_SESSIONS) {
+      for (const session of countedSessions) {
         if (!sessionDays.has(day + '|' + session)) continue;
         // 走读生不参加晚修，晚修那一场不计入他的考勤
         if (session === 'night' && !isBoarder(s)) continue;
@@ -2070,12 +2091,16 @@ async function computeWeek(className, weekStartInput, user) {
 
   const summary = {
     className,
+    // 计入全勤评定的场次，界面上要说明清楚
+    countedSessions,
+    countedSessionLabels: countedSessions.map((s) => SESSION_LABELS[s]),
+    nightCounted: countedSessions.indexOf('night') >= 0,
     weekStart,
     weekEnd: days[6],
     weekLabel: weekLabel(weekStart),
     days,
-    // 这一周本班一共组织了几场考勤，0 场时不该结算
-    sessionTotal: sessionDays.size,
+    // 这一周本班一共组织了几场纳入全勤评定的考勤，0 场时不该结算
+    sessionTotal: [...sessionDays].filter((k) => countedSessions.indexOf(k.split('|')[1]) >= 0).length,
     isCurrentWeek: weekStart === weekStartOf(today),
     statuses: Object.keys(MARK_STATUSES).map((k) => ({ key: k, name: MARK_STATUSES[k] })),
     students: rows,
@@ -3205,6 +3230,24 @@ actions['class.setRule'] = async ({ user, payload }) => {
   }
   await db.collection('classes').doc(cls._id).update({ data: { ruleCode: ruleCode || null } });
   return { message: ruleCode ? '已绑定专业规则' : '已解除专业规则绑定' };
+};
+
+// 设置本班哪些场次计入全勤加分
+actions['class.setWeeklySessions'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const name = String(payload.name || '').trim();
+  if (!name) fail('班级名称不能为空');
+  const raw = Array.isArray(payload.sessions) ? payload.sessions.map(String) : [];
+  const sessions = ATTENDANCE_SESSIONS.filter((s) => raw.indexOf(s) >= 0);
+  if (!sessions.length) fail('至少要有一个场次计入全勤加分');
+
+  const cls = await getOrCreateClassDoc(name, user);
+  if (!cls) fail('班级不存在：' + name);
+  await db.collection('classes').doc(cls._id).update({ data: { weeklySessions: sessions } });
+  return {
+    sessions,
+    message: '全勤加分计入：' + sessions.map((s) => SESSION_LABELS[s]).join('、'),
+  };
 };
 
 actions['major.list'] = async ({ user }) => {

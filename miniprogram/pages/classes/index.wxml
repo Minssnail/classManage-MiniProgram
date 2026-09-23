@@ -45,6 +45,9 @@
         <view class="desc">
           专业规则：{{item.majorName || (item.ruleCode ? item.ruleCode : '未绑定')}}
         </view>
+        <view class="desc">
+          全勤加分计入：{{item.weeklyText}}
+        </view>
       </view>
       <view class="actions">
         <view
@@ -63,6 +66,9 @@
         </view>
         <view class="btn btn-plain btn-sm" data-name="{{item.name}}" bindtap="onSetRule">
           专业规则
+        </view>
+        <view class="btn btn-plain btn-sm" data-name="{{item.name}}" bindtap="onSetWeeklySessions">
+          全勤口径
         </view>
         <view class="btn btn-plain btn-sm" data-name="{{item.name}}" bindtap="onRename">
           重命名
