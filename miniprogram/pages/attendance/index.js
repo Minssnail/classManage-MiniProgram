@@ -30,6 +30,47 @@ const STATUS_POLL_MS = 3000;
 // 首次调用摄像头前须明确告知用途并取得同意，同意后不再重复打扰
 const CAMERA_CONSENT_KEY = 'cameraConsent';
 
+/**
+ * 把一周的异常整理成「哪天 · 哪一场 · 什么情况」。
+ *
+ * 当天两场都是同一种情况时合成一条「全天」——整周缺勤的人否则会排出一长串
+ * 一模一样的徽标；也与「一天请假只算一次」的口径相合。
+ */
+function buildExceptions(detail) {
+  const byDay = {};
+  for (const d of detail || []) {
+    if (d.status === 'present') continue;
+    (byDay[d.day] = byDay[d.day] || []).push(d);
+  }
+  const sameDayTotal = {};
+  for (const d of detail || []) sameDayTotal[d.day] = (sameDayTotal[d.day] || 0) + 1;
+
+  const out = [];
+  for (const day of Object.keys(byDay).sort()) {
+    const rows = byDay[day];
+    const label = day.slice(5).replace('-', '/');
+    const statuses = [...new Set(rows.map((r) => r.status))];
+    // 这一天纳入评定的场次全都是同一种情况，才算「全天」
+    if (statuses.length === 1 && rows.length > 1 && rows.length === sameDayTotal[day]) {
+      const note = rows.find((r) => r.note);
+      out.push({
+        key: day,
+        status: rows[0].status,
+        text: label + ' 全天 ' + rows[0].statusLabel + (note ? '（' + note.note + '）' : ''),
+      });
+      continue;
+    }
+    for (const r of rows) {
+      out.push({
+        key: day + r.session,
+        status: r.status,
+        text: label + ' ' + r.sessionLabel + ' ' + r.statusLabel + (r.note ? '（' + r.note + '）' : ''),
+      });
+    }
+  }
+  return out;
+}
+
 function stopRefresh() {
   wx.stopPullDownRefresh();
 }
@@ -531,6 +572,8 @@ Page({
           countedText: (week.countedSessionLabels || ['面授课', '晚修']).join('、'),
           students: week.students.map((s) => ({
             ...s,
+            // 有异常的逐条列出日期与场次，教师一眼能核对是哪天哪一场
+            exceptions: buildExceptions(s.detail),
             // 一眼看出这人这周为什么是这个分
             summaryText:
               `出勤 ${s.attended}/${s.sessionCount} 场` +

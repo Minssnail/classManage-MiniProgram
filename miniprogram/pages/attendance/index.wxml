@@ -265,6 +265,14 @@
               </view>
               <view class="desc">{{item.summaryText}}</view>
               <view class="desc">{{item.reason}}</view>
+              <view class="exceptions" wx:if="{{item.exceptions.length}}">
+                <text
+                  wx:for="{{item.exceptions}}"
+                  wx:for-item="ex"
+                  wx:key="key"
+                  class="badge {{ex.status === 'leave' ? 'badge-brand' : 'badge-danger'}} ex-badge"
+                >{{ex.text}}</text>
+              </view>
             </view>
             <view class="aside">
               <text class="badge {{item.points ? 'badge-success' : 'badge-muted'}}">{{item.points}} 分</text>

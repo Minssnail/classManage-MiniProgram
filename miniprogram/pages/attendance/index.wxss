@@ -363,3 +363,15 @@
 .suspend-reason {
   font-size: 21rpx;
 }
+
+/* 全勤加分里逐条列出的异常：哪天、哪一场、什么情况 */
+.exceptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8rpx;
+  margin-top: 8rpx;
+}
+
+.ex-badge {
+  font-size: 20rpx;
+}
