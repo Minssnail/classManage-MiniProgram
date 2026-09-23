@@ -204,7 +204,7 @@
           <view class="aside session-cells">
             <view
               class="session-cell tappable"
-              data-id="{{item.studentId}}"
+              data-key="{{item.rowKey}}"
               data-name="{{item.name}}"
               data-session="day"
               bindtap="onCell"
@@ -217,7 +217,7 @@
             </view>
             <view
               class="session-cell {{item.lodging === 'commuting' ? '' : 'tappable'}}"
-              data-id="{{item.studentId}}"
+              data-key="{{item.rowKey}}"
               data-name="{{item.name}}"
               data-session="night"
               bindtap="onCell"

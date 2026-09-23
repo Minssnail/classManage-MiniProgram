@@ -1676,8 +1676,6 @@ actions['attendance.selfCheckin'] = async ({ user, payload }) => {
 // 教师补录打卡（学生忘带手机等情况）
 actions['attendance.manualCheckin'] = async ({ user, payload }) => {
   requireTeacher(user);
-  const studentId = String(payload.studentId || '').trim();
-  if (!studentId) fail('学号不能为空');
   const session = normalizeSession(payload.session);
   const label = SESSION_LABELS[session];
 
@@ -1689,12 +1687,14 @@ actions['attendance.manualCheckin'] = async ({ user, payload }) => {
   if (day > today) fail('不能补录未来的日期');
   const dayText = day === today ? '今日' : day;
 
-  const student = await db.collection('students').where({ studentId }).limit(1).get();
-  if (!student.data.length) fail('学生不存在');
-  if (session === 'night' && !isBoarder(student.data[0])) {
-    fail(`${student.data[0].name}是走读生，无需补录晚修`);
+  const found = await resolveStudentRef(payload);
+  if (!found) fail('学生不存在');
+  const student = { data: [found] };
+  const studentId = found.studentId;
+  if (session === 'night' && !isBoarder(found)) {
+    fail(`${found.name}是走读生，无需补录晚修`);
   }
-  if (await isSuspended(student.data[0].className, day, session)) {
+  if (await isSuspended(found.className, day, session)) {
     fail(`${dayText}${label}已停课，无需补录`);
   }
 
@@ -1732,8 +1732,6 @@ actions['attendance.manualCheckin'] = async ({ user, payload }) => {
  */
 actions['attendance.undoCheckin'] = async ({ user, payload }) => {
   requireTeacher(user);
-  const studentId = String(payload.studentId || '').trim();
-  if (!studentId) fail('缺少学号');
   const session = normalizeSession(payload.session);
   const label = SESSION_LABELS[session];
 
@@ -1741,8 +1739,10 @@ actions['attendance.undoCheckin'] = async ({ user, payload }) => {
   const day = String(payload.day || '').trim() || today;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) fail('日期格式不正确');
 
-  const student = await db.collection('students').where({ studentId }).limit(1).get();
-  if (!student.data.length) fail('学生不存在');
+  const found = await resolveStudentRef(payload);
+  if (!found) fail('学生不存在');
+  const student = { data: [found] };
+  const studentId = found.studentId;
 
   const rows = await fetchAll(
     db.collection('scoreRecords').where({ studentId, scoreType: 'attendance', day })
@@ -2103,18 +2103,39 @@ actions['attendance.suspend'] = async ({ user, payload }) => {
   };
 };
 
+/**
+ * 定位一名学生：优先按学号，没有学号就按学生档案的 _id。
+ *
+ * 班长看到的名单里，没分配学号的同学 studentId 是空的——那本来存的是手机号，
+ * 不能给同学看。只认学号的话，班长对这些同学什么也做不了，
+ * 所以名单每行都带一个 rowKey（就是档案 _id），用它指认。
+ */
+async function resolveStudentRef(payload) {
+  const studentId = String((payload && payload.studentId) || '').trim();
+  if (studentId) {
+    const res = await db.collection('students').where({ studentId }).limit(1).get();
+    return res.data[0] || null;
+  }
+  const key = String((payload && payload.studentKey) || '').trim();
+  if (!key) return null;
+  try {
+    const res = await db.collection('students').doc(key).get();
+    return res.data || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 actions['attendance.mark'] = async ({ user, payload }) => {
   const staff = await requireAttendanceStaff(user, payload);
-  const studentId = String(payload.studentId || '').trim();
-  if (!studentId) fail('缺少学号');
   const session = normalizeSession(payload.session);
   const day = String(payload.day || '').trim() || beijingDay();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) fail('日期格式不正确');
   if (day > beijingDay()) fail('不能标记未来的日期');
 
-  const res = await db.collection('students').where({ studentId }).limit(1).get();
-  const student = res.data[0];
+  const student = await resolveStudentRef(payload);
   if (!student) fail('学生不存在');
+  const studentId = student.studentId;
   if (!staff.isTeacher && student.className !== staff.className) fail('只能标记本班的学生');
   if (session === 'night' && !isBoarder(student)) fail(`${student.name}是走读生，不参加晚修`);
   if (await isSuspended(student.className, day, session)) {

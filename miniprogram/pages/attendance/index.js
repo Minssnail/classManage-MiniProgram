@@ -521,8 +521,10 @@ Page({
    * 补录写的是考勤记录（加 1 分），标记写的是异常，两者互不覆盖。
    */
   async onCell(e) {
-    const { id, session, name } = e.currentTarget.dataset;
-    const row = this.data.todaySummary.students.find((s) => s.studentId === id);
+    const { key, session, name } = e.currentTarget.dataset;
+    // 按 rowKey 找：班长看到的名单里，没分配学号的同学 studentId 是空的，
+    // 拿它去找会全部落到第一个空值那一行上
+    const row = this.data.todaySummary.students.find((s) => s.rowKey === key);
     if (!row) return;
     const state = (session === 'night' ? row.nightState : row.dayState) || {};
     const blocked = cellBlockReason(row, state, session);
@@ -557,7 +559,8 @@ Page({
         );
         if (!ok) return;
         const res = await api.call('attendance.undoCheckin', {
-          studentId: id,
+          studentId: row.studentId || undefined,
+          studentKey: row.rowKey,
           day: this.data.day || undefined,
           session,
         });
@@ -565,14 +568,16 @@ Page({
       } else if (picked.key === 'checkin') {
         // 补的是当前查看的那一天，不是今天
         const res = await api.call('attendance.manualCheckin', {
-          studentId: id,
+          studentId: row.studentId || undefined,
+          studentKey: row.rowKey,
           day: this.data.day || undefined,
           session,
         });
         util.toast(res.message, 'success');
       } else {
         const res = await api.call('attendance.mark', {
-          studentId: id,
+          studentId: row.studentId || undefined,
+          studentKey: row.rowKey,
           day: this.data.day || undefined,
           session,
           status: picked.key === 'clear' ? '' : picked.status,
