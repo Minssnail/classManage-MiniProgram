@@ -598,6 +598,31 @@ Page({
     this.setData({ weekStart: d.toISOString().slice(0, 10) }, () => this.loadWeek());
   },
 
+  /**
+   * 重算以往各周：改了全勤口径或补了标记之后，把过去已发的分一并更正。
+   * 以往周次的「计算结果」本来就随设置立刻变，这个动作改的是已经发出去的分。
+   */
+  async onSettleHistory() {
+    if (this.data.settling) return;
+    const ok = await util.confirm(
+      '将按当前的全勤口径，把本班以往每一周重新结算一遍：\n\n' +
+        '该加的补上、该改的改过来、不该有的撤回，不会重复加分。本周尚未结束，不在其中。',
+      '重算以往各周'
+    );
+    if (!ok) return;
+
+    this.setData({ settling: true });
+    try {
+      const res = await api.call('attendance.settleHistory', { className: this.data.className });
+      wx.showModal({ title: '重算完成', content: res.message, showCancel: false });
+      await this.loadWeek();
+    } catch (e) {
+      // 错误提示已在 api 层弹出
+    } finally {
+      this.setData({ settling: false });
+    }
+  },
+
   async onSettleWeek() {
     const week = this.data.week;
     if (!week || this.data.settling) return;

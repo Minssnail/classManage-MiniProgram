@@ -286,14 +286,14 @@
             <block wx:if="{{!week.nightCounted}}">本班晚修不计入全勤评定（在「班级管理 → 全勤口径」里设置），晚修打卡仍照常记晚修加分。</block>
           </view>
 
-          <button
-            wx:if="{{isTeacher}}"
-            class="btn btn-primary"
-            loading="{{settling}}"
-            bindtap="onSettleWeek"
-          >
-            结算这一周的加分
-          </button>
+          <view class="btn-row" wx:if="{{isTeacher}}">
+            <button class="btn btn-primary" loading="{{settling}}" bindtap="onSettleWeek">
+              结算这一周
+            </button>
+            <button class="btn btn-plain" loading="{{settling}}" bindtap="onSettleHistory">
+              重算以往各周
+            </button>
+          </view>
           <view wx:else class="muted list-tip">结算加分由任课教师操作。</view>
         </block>
       </view>

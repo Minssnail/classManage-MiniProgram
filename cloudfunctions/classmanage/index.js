@@ -2353,6 +2353,75 @@ actions['attendance.settleWeek'] = async ({ user, payload }) => {
 };
 
 /**
+ * 本班有过考勤的所有周，从早到晚。
+ * 用于「重算以往各周」——改了全勤口径、补了标记之后，把过去的周次一并更正。
+ */
+async function weeksWithAttendance(className) {
+  const codes = await fetchAll(db.collection('attendanceCodes').where({ className }));
+  const weeks = new Set();
+  for (const c of codes) if (c.day) weeks.add(weekStartOf(c.day));
+  return [...weeks].sort();
+}
+
+/**
+ * 重算本班以往每一周的全勤加分。
+ *
+ * 口径是按班设置的，改了之后以往各周的计算结果立刻跟着变，但已经发出去的分
+ * 要重新结算才会更正——这个动作就是把所有周过一遍。
+ * 默认不含本周：本周还没结束，现在结算只能按目前为止的考勤算。
+ */
+actions['attendance.settleHistory'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const className = String(payload.className || '').trim();
+  if (!className) fail('请先选择班级');
+
+  const thisWeek = weekStartOf(beijingDay());
+  const weeks = (await weeksWithAttendance(className)).filter((w) =>
+    payload.includeCurrentWeek ? true : w < thisWeek
+  );
+  if (!weeks.length) fail('本班还没有可结算的周次');
+
+  const results = [];
+  let added = 0;
+  let updated = 0;
+  let removed = 0;
+  for (const weekStart of weeks) {
+    const { summary, rawIds } = await computeWeek(className, weekStart, null);
+    if (!summary.sessionTotal) {
+      results.push({ weekStart, weekLabel: summary.weekLabel, skipped: true });
+      continue;
+    }
+    const out = await settleWeek(summary, rawIds, user.username);
+    added += out.added;
+    updated += out.updated;
+    removed += out.removed;
+    results.push({
+      weekStart,
+      weekLabel: summary.weekLabel,
+      added: out.added,
+      updated: out.updated,
+      removed: out.removed,
+      totalPoints: summary.totalPoints,
+    });
+  }
+
+  const touched = results.filter((r) => !r.skipped);
+  return {
+    className,
+    weeks: results,
+    weekCount: touched.length,
+    added,
+    updated,
+    removed,
+    message:
+      `已重算 ${touched.length} 个周次：新增 ${added} 人次` +
+      (updated ? `，更新 ${updated} 人次` : '') +
+      (removed ? `，撤回 ${removed} 人次` : '') +
+      (added + updated + removed ? '' : '，分数没有变化'),
+  };
+};
+
+/**
  * 每周自动结算上一周的全勤加分，逐班执行。
  * 教师事后补了标记，再手动结算一次即可更正，不必担心自动那次算早了。
  */

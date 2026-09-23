@@ -173,6 +173,9 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 - **哪些场次纳入全勤评定按班设置**（班级管理 → 全勤口径）。有的班晚修虽然也考勤，
   但不作为全勤评定依据——这时晚修照常打卡、照常拿那 1 分的晚修加分，只是请假缺勤
   不影响这个班的周加分。没设置过的班两场都算，与之前的行为一致。
+  **改了口径，以往各周的计算结果立刻跟着变**（每次都按班级当前设置重算），
+  但已经发出去的分要重新结算才会更正——考勤页的「重算以往各周」会把本班有过考勤的
+  每一周过一遍，该补的补、该撤的撤，不会重复加分。
 
 结算写的是一条带 `weekKey` 与 `bonusKind: 'weekly'` 的考勤加分记录，计入总积分
 （它没有 `session`，不会被当成晚修那本单独的账）。**可以重复结算**：已发过的按新结果
@@ -283,7 +286,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 补考选课 | `retake.select`、`retake.submit` |
 | 积分 | `score.add`、`score.addBatch`、`score.list` |
 | 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.selfCheckin`、`attendance.manualCheckin`、`attendance.today` |
-| 考勤异常与加分 | `attendance.mark`、`attendance.suspend`、`attendance.weekSummary`、`attendance.settleWeek` |
+| 考勤异常与加分 | `attendance.mark`、`attendance.suspend`、`attendance.weekSummary`、`attendance.settleWeek`、`attendance.settleHistory` |
 | 身份 | `role.list`、`role.add`、`role.remove`、`student.setIdentity` |
 | 奖励 | `reward.add`、`reward.list`、`reward.redeem`、`reward.unredeem` |
 | 统计 | `stats.overview`、`stats.ranking`、`stats.trend` |
