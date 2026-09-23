@@ -29,6 +29,7 @@ const COLLECTIONS = [
   'retakeSelections',
   'cadreRoles',
   'snapshotLogs',
+  'attendanceMarks',
 ];
 
 const SCORE_TYPES = ['attendance', 'homework', 'exam', 'activity', 'other'];
@@ -1702,17 +1703,29 @@ actions['attendance.manualCheckin'] = async ({ user, payload }) => {
 // 今日考勤概况：面授课与晚修分开统计，学生看自己的状态，教师看全班名单
 actions['attendance.today'] = async ({ user, payload }) => {
   requireLogin(user);
-  const day = beijingDay();
+  // 默认今天，也可以翻到别的日期补标记
+  const today = beijingDay();
+  const day = String(payload.day || '').trim() || today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) fail('日期格式不正确');
   const records = await fetchAll(
     db.collection('scoreRecords').where({ scoreType: 'attendance', day })
   );
 
-  // 键为「学号|场次」，升级前没有 session 的记录归入面授
+  // 键为「学号|场次」，升级前没有 session 的记录归入面授；周加分不是当天的打卡
   const byKey = {};
-  for (const r of records) byKey[r.studentId + '|' + (r.session || DEFAULT_SESSION)] = r;
+  for (const r of records) {
+    if (r.bonusKind === 'weekly') continue;
+    byKey[r.studentId + '|' + (r.session || DEFAULT_SESSION)] = r;
+  }
+
+  await ensureCollection('attendanceMarks');
+  const markRows = await fetchAll(db.collection('attendanceMarks').where({ day }));
+  const marksByKey = {};
+  for (const m of markRows) marksByKey[m.studentId + '|' + m.session] = m;
   // 走读生不参加晚修：required 为 false，界面显示「走读」而不是「未打卡」
   const stateOf = (student, session) => {
     const r = byKey[student.studentId + '|' + session];
+    const mark = marksByKey[student.studentId + '|' + session];
     return {
       session,
       sessionLabel: SESSION_LABELS[session],
@@ -1720,6 +1733,10 @@ actions['attendance.today'] = async ({ user, payload }) => {
       checkedIn: !!r,
       timestamp: r ? r.timestamp : null,
       reason: r ? r.reason : null,
+      // 异常标记与打卡并存时以标记为准展示（例如迟到了但也打了卡）
+      status: mark ? mark.status : null,
+      statusLabel: mark ? MARK_STATUSES[mark.status] : null,
+      note: mark ? mark.note : '',
     };
   };
 
@@ -1740,6 +1757,7 @@ actions['attendance.today'] = async ({ user, payload }) => {
     const day1 = sessions[0];
     return {
       day,
+      isToday: day === today,
       sessions,
       // 兼容旧版小程序：这几个字段仍指面授课
       checkedIn: day1.checkedIn,
@@ -1787,6 +1805,8 @@ actions['attendance.today'] = async ({ user, payload }) => {
 
   return {
     day,
+    isToday: day === today,
+    statuses: Object.keys(MARK_STATUSES).map((k) => ({ key: k, name: MARK_STATUSES[k] })),
     className,
     total: list.length,
     // 晚修的应到人数只算住宿生
@@ -1797,6 +1817,396 @@ actions['attendance.today'] = async ({ user, payload }) => {
     students,
   };
 };
+
+// ---------- 考勤异常与全勤加分 ----------
+
+/**
+ * 考勤异常：教师与班长可按场次标记，一天一场最多一条。
+ * 只有这四种——每一种在全勤规则里都有明确含义，随意增加会让加分规则无从判定。
+ */
+const MARK_STATUSES = {
+  leave: '请假',
+  late: '迟到',
+  early: '早退',
+  absent: '缺勤',
+};
+
+/**
+ * 全勤加分规则（与「加分说明」一致）：
+ *   一周内全勤加 3 分，请假一天加 2 分，请假两天加 1 分；
+ *   迟到早退累计 2 次及以上、或有无故缺勤的，不加分。
+ *
+ * 「面授课或晚修请假也算当天请假一次」——所以请假按**天**去重，
+ * 同一天两场都请假仍只算一天；迟到早退则按**次**累计。
+ */
+const WEEKLY_FULL_ATTENDANCE = 3;
+const WEEKLY_LEAVE_POINTS = { 0: 3, 1: 2, 2: 1 };
+const LATE_EARLY_LIMIT = 2;
+
+function weeklyPoints({ leaveDays, lateEarlyCount, absentDays }) {
+  if (absentDays > 0) return { points: 0, reason: '有无故缺勤' };
+  if (lateEarlyCount >= LATE_EARLY_LIMIT) {
+    return { points: 0, reason: `迟到早退 ${lateEarlyCount} 次` };
+  }
+  const points = WEEKLY_LEAVE_POINTS[leaveDays];
+  if (points === undefined) return { points: 0, reason: `请假 ${leaveDays} 天` };
+  if (leaveDays === 0) {
+    return {
+      points,
+      reason: lateEarlyCount ? `全勤（迟到早退 ${lateEarlyCount} 次，未达 2 次）` : '全勤',
+    };
+  }
+  return { points, reason: `请假 ${leaveDays} 天` };
+}
+
+// 周一为一周之始，用这一周周一的日期作为周标识
+function weekStartOf(day) {
+  const d = new Date(day + 'T00:00:00.000Z');
+  const dow = d.getUTCDay(); // 0 是周日
+  return shiftDay(day, dow === 0 ? -6 : 1 - dow);
+}
+
+function weekDays(weekStart) {
+  const days = [];
+  for (let i = 0; i < 7; i++) days.push(shiftDay(weekStart, i));
+  return days;
+}
+
+function weekLabel(weekStart) {
+  const end = shiftDay(weekStart, 6);
+  return weekStart.slice(5).replace('-', '/') + '–' + end.slice(5).replace('-', '/');
+}
+
+async function markMap(className, days) {
+  await ensureCollection('attendanceMarks');
+  const rows = await fetchAll(
+    db.collection('attendanceMarks').where({
+      className,
+      day: _.gte(days[0]).and(_.lte(days[days.length - 1])),
+    })
+  );
+  const map = {};
+  for (const m of rows) map[m.studentId + '|' + m.day + '|' + m.session] = m;
+  return map;
+}
+
+/**
+ * 本班有考勤的日子：当天该场次出过考勤码，就说明这一场确实组织了考勤。
+ * 没出过码的日子不算缺勤——否则周末、节假日都会被判成无故缺勤。
+ */
+async function classSessionDays(className, days) {
+  const codes = await fetchAll(
+    db.collection('attendanceCodes').where({
+      className,
+      day: _.gte(days[0]).and(_.lte(days[days.length - 1])),
+    })
+  );
+  const set = new Set();
+  for (const c of codes) set.add(c.day + '|' + (c.session || DEFAULT_SESSION));
+  return set;
+}
+
+actions['attendance.mark'] = async ({ user, payload }) => {
+  const staff = await requireAttendanceStaff(user, payload);
+  const studentId = String(payload.studentId || '').trim();
+  if (!studentId) fail('缺少学号');
+  const session = normalizeSession(payload.session);
+  const day = String(payload.day || '').trim() || beijingDay();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) fail('日期格式不正确');
+  if (day > beijingDay()) fail('不能标记未来的日期');
+
+  const res = await db.collection('students').where({ studentId }).limit(1).get();
+  const student = res.data[0];
+  if (!student) fail('学生不存在');
+  if (!staff.isTeacher && student.className !== staff.className) fail('只能标记本班的学生');
+  if (session === 'night' && !isBoarder(student)) fail(`${student.name}是走读生，不参加晚修`);
+
+  await ensureCollection('attendanceMarks');
+  const key = { studentId, day, session };
+  const existing = await db.collection('attendanceMarks').where(key).limit(1).get();
+
+  // status 传空表示清除标记
+  const status = String(payload.status || '').trim();
+  if (!status) {
+    for (const m of existing.data) await db.collection('attendanceMarks').doc(m._id).remove();
+    return { studentId, day, session, status: null, message: `已清除${student.name}的标记` };
+  }
+  if (!MARK_STATUSES[status]) fail('考勤状态无效');
+
+  const data = {
+    ...key,
+    className: student.className || null,
+    status,
+    note: String(payload.note || '').trim(),
+    semesterId: await currentSemesterId(),
+    operator: user.username,
+    updatedAt: new Date(),
+  };
+  if (existing.data.length) {
+    await db.collection('attendanceMarks').doc(existing.data[0]._id).update({ data });
+    for (const extra of existing.data.slice(1)) {
+      await db.collection('attendanceMarks').doc(extra._id).remove();
+    }
+  } else {
+    await db.collection('attendanceMarks').add({ data });
+  }
+
+  return {
+    studentId,
+    day,
+    session,
+    status,
+    statusLabel: MARK_STATUSES[status],
+    message: `${student.name} ${day} ${SESSION_LABELS[session]}：${MARK_STATUSES[status]}`,
+  };
+};
+
+/**
+ * 一周的考勤汇总与应得加分。
+ * 只统计「本班这一周实际组织过考勤的场次」，逐人算出出勤、请假、迟到早退与缺勤。
+ */
+async function buildWeekSummary(user, payload) {
+  // 返回 { summary, rawIds }：班长看到的 studentId 会被脱敏，
+  // 结算时要用真实学号，所以单独带一份 rowKey → 学号的对照
+  const staff = await requireAttendanceStaff(user, payload);
+  if (!staff.className) fail('请先选择班级');
+  return computeWeek(staff.className, payload.weekStart, user);
+}
+
+/**
+ * 算一个班某一周的考勤与应得加分。
+ * user 只用于脱敏展示，定时结算时不传。
+ */
+async function computeWeek(className, weekStartInput, user) {
+  const today = beijingDay();
+  const weekStart = weekStartOf(String(weekStartInput || '').trim() || today);
+  const days = weekDays(weekStart);
+
+  const [students, marks, sessionDays, scores] = await Promise.all([
+    fetchAll(db.collection('students').where({ className }).orderBy('name', 'asc')),
+    markMap(className, days),
+    classSessionDays(className, days),
+    fetchAll(
+      db.collection('scoreRecords').where({
+        scoreType: 'attendance',
+        day: _.gte(days[0]).and(_.lte(days[6])),
+      })
+    ),
+  ]);
+
+  // 已打卡：扫码或补录写下的考勤记录（周加分自己也是考勤记录，要排除）
+  const checked = new Set();
+  for (const r of scores) {
+    if (r.bonusKind === 'weekly') continue;
+    checked.add(r.studentId + '|' + r.day + '|' + (r.session || DEFAULT_SESSION));
+  }
+
+  const isTeacher = !user || user.role === 'teacher';
+  const rows = students.map((s) => {
+    const detail = [];
+    let attended = 0;
+    let lateEarlyCount = 0;
+    const leaveDaySet = new Set();
+    const absentDaySet = new Set();
+
+    for (const day of days) {
+      for (const session of ATTENDANCE_SESSIONS) {
+        if (!sessionDays.has(day + '|' + session)) continue;
+        // 走读生不参加晚修，晚修那一场不计入他的考勤
+        if (session === 'night' && !isBoarder(s)) continue;
+
+        const mark = marks[s.studentId + '|' + day + '|' + session];
+        const didCheck = checked.has(s.studentId + '|' + day + '|' + session);
+        let status;
+        if (mark) status = mark.status;
+        else if (didCheck) status = 'present';
+        else status = 'absent'; // 组织了考勤又没打卡、也没标记，按无故缺勤
+
+        if (status === 'present') attended++;
+        else if (status === 'leave') leaveDaySet.add(day);
+        else if (status === 'absent') absentDaySet.add(day);
+        else if (status === 'late' || status === 'early') {
+          lateEarlyCount++;
+          // 迟到早退仍然到了课，算出勤
+          attended++;
+        }
+        detail.push({
+          day,
+          session,
+          sessionLabel: SESSION_LABELS[session],
+          status,
+          statusLabel: status === 'present' ? '出勤' : MARK_STATUSES[status],
+          marked: !!mark,
+          note: mark ? mark.note : '',
+        });
+      }
+    }
+
+    const stat = {
+      leaveDays: leaveDaySet.size,
+      lateEarlyCount,
+      absentDays: absentDaySet.size,
+    };
+    const { points, reason } = weeklyPoints(stat);
+    return {
+      studentId: isTeacher ? s.studentId : visibleStudentId(user, { [s.studentId]: s }, s.studentId),
+      rowKey: s._id,
+      name: s.name,
+      lodging: lodgingOf(s),
+      lodgingLabel: LODGING_LABELS[lodgingOf(s)],
+      sessionCount: detail.length,
+      attended,
+      ...stat,
+      points,
+      reason,
+      detail,
+      // 本周还没结束时先给个预估，提醒别急着结算
+      settled: false,
+    };
+  });
+
+  const rawIds = {};
+  for (const s of students) rawIds[s._id] = s.studentId;
+
+  const summary = {
+    className,
+    weekStart,
+    weekEnd: days[6],
+    weekLabel: weekLabel(weekStart),
+    days,
+    // 这一周本班一共组织了几场考勤，0 场时不该结算
+    sessionTotal: sessionDays.size,
+    isCurrentWeek: weekStart === weekStartOf(today),
+    statuses: Object.keys(MARK_STATUSES).map((k) => ({ key: k, name: MARK_STATUSES[k] })),
+    students: rows,
+    totalPoints: rows.reduce((n, r) => n + r.points, 0),
+    fullAttendanceCount: rows.filter((r) => r.points === WEEKLY_FULL_ATTENDANCE).length,
+    noBonusCount: rows.filter((r) => r.points === 0).length,
+  };
+  return { summary, rawIds };
+}
+
+actions['attendance.weekSummary'] = async ({ user, payload }) => {
+  const { summary, rawIds } = await buildWeekSummary(user, payload);
+  const settled = await weeklyBonusMap(summary.weekStart);
+  for (const row of summary.students) {
+    const rec = settled[rawIds[row.rowKey]];
+    row.settled = !!rec;
+    row.settledPoints = rec ? rec.score : null;
+  }
+  summary.settledCount = summary.students.filter((r) => r.settled).length;
+  return summary;
+};
+
+// 某一周已发放的周加分，按学号索引
+async function weeklyBonusMap(weekStart) {
+  const rows = await fetchAll(
+    db.collection('scoreRecords').where({ scoreType: 'attendance', weekKey: weekStart })
+  );
+  const map = {};
+  for (const r of rows) if (r.bonusKind === 'weekly') map[r.studentId] = r;
+  return map;
+}
+
+/**
+ * 结算某一周的全勤加分：每人一条考勤记录，带 weekKey 与 bonusKind='weekly'。
+ *
+ * 可以重复结算——教师事后补标了请假、补录了打卡，再结算一次会按新结果
+ * 更新或撤回已发的分，而不是又加一遍。
+ */
+/**
+ * 按算出的结果发放/更正/撤回某一周的加分。
+ * 重复结算不会重复加分：已发过的按新结果更新，现在不该有分的撤回。
+ */
+async function settleWeek(summary, rawIds, operator) {
+  const existing = await weeklyBonusMap(summary.weekStart);
+  const semesterId = await currentSemesterId();
+  const now = new Date();
+
+  let added = 0;
+  let updated = 0;
+  let removed = 0;
+  for (const row of summary.students) {
+    const studentId = rawIds[row.rowKey];
+    const prev = existing[studentId];
+    if (!row.points) {
+      // 本周不该加分：之前发过就撤回
+      if (prev) {
+        await db.collection('scoreRecords').doc(prev._id).remove();
+        removed++;
+      }
+      continue;
+    }
+    const data = {
+      studentId,
+      semesterId,
+      scoreType: 'attendance',
+      bonusKind: 'weekly',
+      weekKey: summary.weekStart,
+      score: row.points,
+      reason: `${summary.weekLabel} 考勤加分：${row.reason}`,
+      operator,
+      timestamp: now,
+      day: summary.weekEnd,
+    };
+    if (prev) {
+      if (prev.score !== row.points || prev.reason !== data.reason) {
+        await db.collection('scoreRecords').doc(prev._id).update({ data });
+        updated++;
+      }
+    } else {
+      await db.collection('scoreRecords').add({ data });
+      added++;
+    }
+  }
+
+  return {
+    weekStart: summary.weekStart,
+    weekLabel: summary.weekLabel,
+    className: summary.className,
+    added,
+    updated,
+    removed,
+    totalPoints: summary.totalPoints,
+    message:
+      `${summary.weekLabel} 结算完成：新增 ${added} 人` +
+      (updated ? `，更新 ${updated} 人` : '') +
+      (removed ? `，撤回 ${removed} 人` : '') +
+      `，合计 ${summary.totalPoints} 分`,
+  };
+}
+
+actions['attendance.settleWeek'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const { summary, rawIds } = await buildWeekSummary(user, payload);
+  if (!summary.sessionTotal) fail(`${summary.weekLabel} 本班没有组织过考勤，无需结算`);
+  return settleWeek(summary, rawIds, user.username);
+};
+
+/**
+ * 每周自动结算上一周的全勤加分，逐班执行。
+ * 教师事后补了标记，再手动结算一次即可更正，不必担心自动那次算早了。
+ */
+async function settleLastWeekForAllClasses() {
+  const lastWeek = shiftDay(weekStartOf(beijingDay()), -7);
+  const classes = await fetchAll(db.collection('classes'));
+  const names = [...new Set(classes.map((c) => c.name).filter(Boolean))];
+  const results = [];
+  for (const className of names) {
+    try {
+      const { summary, rawIds } = await computeWeek(className, lastWeek, null);
+      if (!summary.sessionTotal) {
+        results.push({ className, skipped: true, reason: '本周未组织考勤' });
+        continue;
+      }
+      const out = await settleWeek(summary, rawIds, 'system');
+      results.push({ className, added: out.added, updated: out.updated, removed: out.removed, totalPoints: out.totalPoints });
+    } catch (err) {
+      results.push({ className, error: err && err.message ? err.message : String(err) });
+    }
+  }
+  return { weekStart: lastWeek, weekLabel: weekLabel(lastWeek), classes: results };
+}
 
 // ---------- 奖励 ----------
 
@@ -3332,6 +3742,26 @@ actions['snapshot.status'] = async ({ user }) => {
   };
 };
 
+// 每周自动结算上一周的全勤加分，同样记日志备查
+async function handleWeeklyBonusTimer(event) {
+  await ensureCollection('snapshotLogs');
+  try {
+    const result = await settleLastWeekForAllClasses();
+    await db.collection('snapshotLogs').add({
+      data: { kind: 'weeklyBonus', ...result, ok: true, createdAt: new Date() },
+    });
+    console.log('[classmanage] 周考勤加分结算完成', result.weekLabel, JSON.stringify(result.classes));
+    return { ok: true, data: result };
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    await db.collection('snapshotLogs').add({
+      data: { kind: 'weeklyBonus', ok: false, error: message, createdAt: new Date() },
+    });
+    console.error('[classmanage] 周考勤加分结算失败', event && event.TriggerName, message);
+    return { ok: false, error: message };
+  }
+}
+
 // 定时触发没有调用方可以看返回值，跑完记一条日志，出了问题事后能查
 async function handleTimer(event) {
   await ensureCollection('snapshotLogs');
@@ -3375,6 +3805,9 @@ exports.main = async (event) => {
   if (event && event.Type === 'timer') {
     if (cloud.getWXContext().OPENID) {
       return { ok: false, error: '未知的操作：' + event.Type };
+    }
+    if (String(event.TriggerName || '').indexOf('AttendanceBonus') >= 0) {
+      return handleWeeklyBonusTimer(event);
     }
     return handleTimer(event);
   }

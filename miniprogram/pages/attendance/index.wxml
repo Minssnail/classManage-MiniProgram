@@ -154,8 +154,16 @@
       <!-- 今日考勤名单：教师可补录，班长只读 -->
       <view class="card" wx:if="{{todaySummary}}">
         <view class="card-title">
-          今日考勤（{{todaySummary.day}}）
+          {{isToday ? '今日考勤' : '考勤名单'}}
           <text class="sub">共 {{todaySummary.total}} 人</text>
+        </view>
+        <view class="day-bar">
+          <picker class="picker day-picker" mode="date" value="{{day}}" end="{{today}}" bindchange="onDay">
+            <text>{{day}}</text>
+            <text class="arrow">▾</text>
+          </picker>
+          <text wx:if="{{!isToday}}" class="link" bindtap="onBackToToday">回到今天</text>
+          <text wx:else class="muted">今天</text>
         </view>
         <view class="session-sum" wx:if="{{todaySummary.sessionCounts}}">
           <text class="badge badge-brand">
@@ -165,7 +173,10 @@
             晚修 {{todaySummary.sessionCounts.night}}<text wx:if="{{todaySummary.sessionTotals}}"> / {{todaySummary.sessionTotals.night}} 住宿生</text>
           </text>
         </view>
-        <view class="muted list-tip" wx:if="{{isMonitor}}">补录考勤请联系任课教师</view>
+        <view class="muted list-tip">
+          点任意一格可标记请假、迟到、早退、缺勤<block wx:if="{{isTeacher}}">，或补录出勤</block>。
+          <block wx:if="{{isMonitor}}">补录出勤请联系任课教师。</block>
+        </view>
 
         <view wx:for="{{todaySummary.students}}" wx:key="rowKey" class="list-item">
           <view class="main">
@@ -175,38 +186,86 @@
             </view>
           </view>
           <view class="aside session-cells">
-            <view class="session-cell">
+            <view
+              class="session-cell tappable"
+              data-id="{{item.studentId}}"
+              data-name="{{item.name}}"
+              data-session="day"
+              bindtap="onCell"
+            >
               <text class="session-tag">面授</text>
-              <text wx:if="{{item.dayState.checkedIn}}" class="badge badge-success">已打卡</text>
-              <view
-                wx:elif="{{isTeacher}}"
-                class="btn btn-ghost btn-sm"
-                data-id="{{item.studentId}}"
-                data-session="day"
-                bindtap="onManualCheckin"
-              >
-                补录
-              </view>
+              <text wx:if="{{item.dayState.status}}" class="badge {{item.dayState.status === 'leave' ? 'badge-brand' : 'badge-danger'}}">{{item.dayState.statusLabel}}</text>
+              <text wx:elif="{{item.dayState.checkedIn}}" class="badge badge-success">已打卡</text>
               <text wx:else class="badge badge-muted">未打卡</text>
             </view>
-            <view class="session-cell">
+            <view
+              class="session-cell {{item.nightState.required === false ? '' : 'tappable'}}"
+              data-id="{{item.studentId}}"
+              data-name="{{item.name}}"
+              data-session="night"
+              bindtap="onCell"
+            >
               <text class="session-tag">晚修</text>
               <text wx:if="{{item.nightState.required === false}}" class="badge badge-muted">走读</text>
+              <text wx:elif="{{item.nightState.status}}" class="badge {{item.nightState.status === 'leave' ? 'badge-brand' : 'badge-danger'}}">{{item.nightState.statusLabel}}</text>
               <text wx:elif="{{item.nightState.checkedIn}}" class="badge badge-success">已打卡</text>
-              <view
-                wx:elif="{{isTeacher}}"
-                class="btn btn-ghost btn-sm"
-                data-id="{{item.studentId}}"
-                data-session="night"
-                bindtap="onManualCheckin"
-              >
-                补录
-              </view>
               <text wx:else class="badge badge-muted">未打卡</text>
             </view>
           </view>
         </view>
         <view wx:if="{{!todaySummary.students.length}}" class="empty">暂无学生数据</view>
+      </view>
+
+      <!-- 本周考勤与全勤加分 -->
+      <view class="card" wx:if="{{week}}">
+        <view class="card-title">
+          全勤加分
+          <text class="sub">{{week.weekLabel}}{{week.isCurrentWeek ? ' · 本周' : ''}}</text>
+        </view>
+        <view class="week-bar">
+          <text class="link" data-delta="-1" bindtap="onWeekShift">‹ 上一周</text>
+          <text class="muted">共 {{week.sessionTotal}} 场考勤</text>
+          <text class="link" data-delta="1" bindtap="onWeekShift">下一周 ›</text>
+        </view>
+
+        <view class="week-sum">
+          <text class="badge badge-success">全勤 {{week.fullAttendanceCount}} 人</text>
+          <text class="badge badge-muted">不加分 {{week.noBonusCount}} 人</text>
+          <text class="badge badge-brand">合计 {{week.totalPoints}} 分</text>
+          <text wx:if="{{week.settledCount}}" class="badge badge-warning">已结算 {{week.settledCount}} 人</text>
+        </view>
+
+        <view wx:if="{{!week.sessionTotal}}" class="empty">这一周本班没有组织过考勤</view>
+        <block wx:else>
+          <view wx:for="{{week.students}}" wx:key="rowKey" class="list-item">
+            <view class="main">
+              <view class="title">
+                {{item.name}}
+                <text wx:if="{{item.settled}}" class="badge badge-muted id-badge">已结算 {{item.settledPoints}} 分</text>
+              </view>
+              <view class="desc">{{item.summaryText}}</view>
+              <view class="desc">{{item.reason}}</view>
+            </view>
+            <view class="aside">
+              <text class="badge {{item.points ? 'badge-success' : 'badge-muted'}}">{{item.points}} 分</text>
+            </view>
+          </view>
+
+          <view class="muted list-tip">
+            一周内全勤加 3 分，请假一天加 2 分、两天加 1 分；迟到早退累计 2 次及以上，或有无故缺勤的不加分。
+            面授课或晚修请假都只算当天请假一次。组织了考勤却没打卡、也没标记的，按无故缺勤计。
+          </view>
+
+          <button
+            wx:if="{{isTeacher}}"
+            class="btn btn-primary"
+            loading="{{settling}}"
+            bindtap="onSettleWeek"
+          >
+            结算这一周的加分
+          </button>
+          <view wx:else class="muted list-tip">结算加分由任课教师操作。</view>
+        </block>
       </view>
     </block>
 

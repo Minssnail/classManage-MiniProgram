@@ -17,6 +17,14 @@ const SESSIONS = [
   { key: 'night', label: '晚修' },
 ];
 
+// 考勤异常，与云函数的 MARK_STATUSES 对应
+const MARK_STATUSES = [
+  { key: 'leave', name: '请假' },
+  { key: 'late', name: '迟到' },
+  { key: 'early', name: '早退' },
+  { key: 'absent', name: '缺勤' },
+];
+
 const STATUS_POLL_MS = 3000;
 
 // 首次调用摄像头前须明确告知用途并取得同意，同意后不再重复打扰
@@ -40,9 +48,17 @@ function decorateSessions(sessions) {
     ...x,
     required: x.required !== false,
     timeText: util.formatDateTime(x.timestamp),
-    stateText: x.checkedIn ? util.formatDateTime(x.timestamp) : x.required === false ? '走读生无需打卡' : '未打卡',
+    // 被教师标了请假之类的，学生自己也要看得到
+    stateText: x.statusLabel
+      ? x.statusLabel + (x.checkedIn ? ' · ' + util.formatDateTime(x.timestamp) : '')
+      : x.checkedIn
+        ? util.formatDateTime(x.timestamp)
+        : x.required === false
+          ? '走读生无需打卡'
+          : '未打卡',
   }));
-  const required = list.filter((x) => x.required);
+  // 已请假的场次不必再打卡，不计入「还差几场」
+  const required = list.filter((x) => x.required && x.status !== 'leave');
   return {
     sessions: list,
     requiredCount: required.length,
@@ -76,6 +92,16 @@ Page({
     // 班长本人在当前场次的状态
     selfChecking: false,
     myRow: null,
+
+    // 名单查看的日期，默认今天
+    day: '',
+    today: '',
+    isToday: true,
+
+    // 本周考勤与全勤加分
+    week: null,
+    weekStart: '',
+    settling: false,
 
     // 学生端
     myStatus: null,
@@ -125,7 +151,7 @@ Page({
 
     if (readonly) return;
     if (isTeacher || isMonitor) {
-      await this.loadTodaySummary();
+      await Promise.all([this.loadTodaySummary(), this.loadWeek()]);
       this.startTimers();
       // 从别的页面回来时画布是新挂载的，要重画
       if (this.data.code && this.onPresentTab()) this.renderQrCode(this.data.code.content);
@@ -144,7 +170,9 @@ Page({
 
   onPullDownRefresh() {
     const task =
-      this.data.isTeacher || this.data.isMonitor ? this.loadTodaySummary() : this.loadMyStatus();
+      this.data.isTeacher || this.data.isMonitor
+        ? Promise.all([this.loadTodaySummary(), this.loadWeek()])
+        : this.loadMyStatus();
     task.then(stopRefresh, stopRefresh);
   },
 
@@ -321,11 +349,23 @@ Page({
     }
   },
 
+  // 翻到别的日期补标记
+  onDay(e) {
+    const day = e.detail.value;
+    if (day === this.data.day) return;
+    this.setData({ day }, () => this.loadTodaySummary());
+  },
+
+  onBackToToday() {
+    if (this.data.isToday) return;
+    this.setData({ day: this.data.today || '' }, () => this.loadTodaySummary());
+  },
+
   async loadTodaySummary() {
     try {
       const summary = await api.call(
         'attendance.today',
-        { className: this.data.className },
+        { className: this.data.className, day: this.data.day || undefined },
         { loading: false }
       );
       // WXML 里按场次取值不方便，这里摊平成两个字段
@@ -341,9 +381,139 @@ Page({
         dayState: pick(st, 'day'),
         nightState: pick(st, 'night'),
       }));
-      this.setData({ todaySummary: { ...summary, students } }, () => this.refreshMyRow());
+      this.setData(
+        {
+          todaySummary: { ...summary, students },
+          day: summary.day,
+          isToday: summary.isToday !== false,
+          today: summary.isToday !== false ? summary.day : this.data.today,
+        },
+        () => this.refreshMyRow()
+      );
     } catch (e) {
       // 错误提示已在 api 层弹出
+    }
+  },
+
+  /**
+   * 点名单里的某一格：教师可补录出勤或标记异常，班长只能标记异常。
+   * 补录写的是考勤记录（加 1 分），标记写的是异常，两者互不覆盖。
+   */
+  async onCell(e) {
+    const { id, session, name } = e.currentTarget.dataset;
+    const row = this.data.todaySummary.students.find((s) => s.studentId === id);
+    if (!row) return;
+    const state = session === 'night' ? row.nightState : row.dayState;
+    if (state.required === false) {
+      util.toast(name + ' 是走读生，不参加晚修');
+      return;
+    }
+
+    const actions = [];
+    if (this.data.isTeacher && !state.checkedIn) actions.push({ key: 'checkin', label: '补录出勤' });
+    for (const s of MARK_STATUSES) {
+      if (s.key !== state.status) actions.push({ key: 'mark', status: s.key, label: '标记' + s.name });
+    }
+    if (state.status) actions.push({ key: 'clear', label: '清除标记（' + state.statusLabel + '）' });
+
+    const picked = await new Promise((resolve) => {
+      wx.showActionSheet({
+        itemList: actions.map((a) => a.label),
+        success: (res) => resolve(actions[res.tapIndex]),
+        fail: () => resolve(null),
+      });
+    });
+    if (!picked) return;
+
+    try {
+      if (picked.key === 'checkin') {
+        const res = await api.call('attendance.manualCheckin', { studentId: id, session });
+        util.toast(res.message, 'success');
+      } else {
+        const res = await api.call('attendance.mark', {
+          studentId: id,
+          day: this.data.day || undefined,
+          session,
+          status: picked.key === 'clear' ? '' : picked.status,
+        });
+        util.toast(res.message, 'success');
+      }
+      await Promise.all([this.loadTodaySummary(), this.loadWeek()]);
+    } catch (err) {
+      // 错误提示已在 api 层弹出
+    }
+  },
+
+  // ============================================================
+  // 全勤加分
+  // ============================================================
+
+  async loadWeek() {
+    try {
+      const week = await api.call(
+        'attendance.weekSummary',
+        { className: this.data.className, weekStart: this.data.weekStart || undefined },
+        { loading: false, silent: true }
+      );
+      this.setData({
+        weekStart: week.weekStart,
+        week: {
+          ...week,
+          students: week.students.map((s) => ({
+            ...s,
+            // 一眼看出这人这周为什么是这个分
+            summaryText:
+              `出勤 ${s.attended}/${s.sessionCount} 场` +
+              (s.leaveDays ? ` · 请假 ${s.leaveDays} 天` : '') +
+              (s.lateEarlyCount ? ` · 迟到早退 ${s.lateEarlyCount} 次` : '') +
+              (s.absentDays ? ` · 缺勤 ${s.absentDays} 天` : ''),
+          })),
+        },
+      });
+    } catch (e) {
+      // 老版本云函数没有这个接口时不显示这张卡
+      this.setData({ week: null });
+    }
+  },
+
+  onWeekShift(e) {
+    const delta = Number(e.currentTarget.dataset.delta);
+    const base = this.data.weekStart || this.data.today;
+    if (!base) return;
+    const d = new Date(base + 'T00:00:00.000Z');
+    d.setUTCDate(d.getUTCDate() + delta * 7);
+    this.setData({ weekStart: d.toISOString().slice(0, 10) }, () => this.loadWeek());
+  },
+
+  async onSettleWeek() {
+    const week = this.data.week;
+    if (!week || this.data.settling) return;
+    if (!week.sessionTotal) {
+      util.toast('这一周本班没有组织过考勤');
+      return;
+    }
+    const ok = await util.confirm(
+      `将按全勤规则给 ${week.className} 结算 ${week.weekLabel} 的考勤加分：\n\n` +
+        `全勤 ${week.fullAttendanceCount} 人，不加分 ${week.noBonusCount} 人，合计 ${week.totalPoints} 分。` +
+        (week.isCurrentWeek
+          ? '\n\n注意：本周尚未结束，现在结算只统计到目前为止的考勤。之后补了标记可以再结算一次，分数会自动更正。'
+          : '\n\n重复结算不会重复加分；改了标记后再结算会自动更正。'),
+      '结算考勤加分'
+    );
+    if (!ok) return;
+
+    this.setData({ settling: true });
+    try {
+      const res = await api.call('attendance.settleWeek', {
+        className: this.data.className,
+        weekStart: week.weekStart,
+      });
+      wx.showModal({ title: '结算完成', content: res.message, showCancel: false });
+      await this.loadWeek();
+    } catch (e) {
+      // 错误提示已在 api 层弹出
+    } finally {
+      this.setData({ settling: false });
     }
   },
 
@@ -382,25 +552,6 @@ Page({
       // 错误提示已在 api 层弹出
     } finally {
       this.setData({ selfChecking: false });
-    }
-  },
-
-  // 教师补录：学生忘带手机等特殊情况。班长没有这个权限
-  async onManualCheckin(e) {
-    const studentId = String(e.currentTarget.dataset.id || '').trim();
-    const session = String(e.currentTarget.dataset.session || this.data.session);
-    if (!studentId) {
-      util.toast('缺少学号');
-      return;
-    }
-    const ok = await util.confirm(`确认为该学生补录今日${labelOf(session)}考勤吗？`, '补录考勤');
-    if (!ok) return;
-    try {
-      const res = await api.call('attendance.manualCheckin', { studentId, session });
-      util.toast(res.message, 'success');
-      await this.loadTodaySummary();
-    } catch (err) {
-      // 错误提示已在 api 层弹出
     }
   },
 

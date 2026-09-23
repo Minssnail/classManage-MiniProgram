@@ -287,3 +287,53 @@
 .hint .link {
   color: var(--brand);
 }
+
+/* 名单日期切换 */
+.day-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+
+.day-picker {
+  flex: none;
+  min-width: 260rpx;
+}
+
+/* 每一格可点：标记请假、迟到等 */
+.session-cell.tappable {
+  padding: 4rpx 8rpx;
+  border-radius: 10rpx;
+  background: rgba(59, 91, 219, 0.04);
+}
+
+.list-tip {
+  font-size: 22rpx;
+  line-height: 1.7;
+  margin: 8rpx 0 12rpx;
+}
+
+/* 全勤加分 */
+.week-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 24rpx;
+  margin-bottom: 16rpx;
+}
+
+.week-bar .link {
+  color: var(--brand);
+}
+
+.week-sum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-bottom: 16rpx;
+}
+
+.id-badge {
+  margin-left: 10rpx;
+}

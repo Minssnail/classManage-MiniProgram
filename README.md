@@ -39,7 +39,8 @@ cloudfunctions/
    **幂等**，不会覆盖已有数据。首次执行（库中还没有任何账号）无需登录态，之后仅教师可执行。
 4. **设置数据库权限**：云开发控制台 → 数据库 → 逐个集合把权限设为
    **「仅管理端可读写」**：`users` / `students` / `classes` / `semesters` / `scoreRecords` / `rewards` /
-   `attendanceCodes` / `majors` / `courses` / `examScores` / `retakeSelections` / `cadreRoles` / `snapshotLogs`。
+   `attendanceCodes` / `majors` / `courses` / `examScores` / `retakeSelections` / `cadreRoles` /
+   `snapshotLogs` / `attendanceMarks`。
    后面几个是随功能陆续加的，其中 `examScores` 存的是成绩，尤其不能漏。
    小程序端不直接读写数据库，全部经由云函数，因此关闭客户端权限不影响功能，且能杜绝前端刷分。
 
@@ -140,6 +141,41 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 「学生自行打卡」的入口已彻底移除：`attendance.checkin` 必须携带有效令牌才会写入考勤记录，
 补录接口 `attendance.manualCheckin` 则要求教师权限。
 
+### 考勤异常与全勤加分
+
+教师与班长可以在考勤名单里点任意一格，标记**请假 / 迟到 / 早退 / 缺勤**；
+名单顶部可切换日期，事后补标。教师还能在同一处补录出勤。
+只有这四种状态——每一种在全勤规则里都有明确含义，随意增加会让加分无从判定。
+
+系统据此按周自动结算加分，规则与「加分说明」一致：
+
+| 情况 | 加分 |
+| --- | --- |
+| 一周内全勤 | 3 分 |
+| 请假一天 | 2 分 |
+| 请假两天 | 1 分 |
+| 请假三天及以上 | 0 分 |
+| 迟到早退累计 2 次及以上 | 0 分 |
+| 有无故缺勤 | 0 分 |
+
+几个判定口径：
+
+- **请假按天去重，迟到早退按次累计**：面授课或晚修请假都只算当天请假一次，
+  同一天两场都请假仍是一天；迟到、早退则每场各算一次；
+- **迟到早退仍算到课**，只是累计到 2 次就不加分；
+- **哪天算上课日由考勤码推出来**：当天该场次出过考勤码，就说明这一场确实组织了考勤。
+  没出过码的日子（周末、节假日）不计入，不会被判成缺勤；
+- **组织了考勤却没打卡、也没标记的，按无故缺勤计**。教师补录出勤或补标请假后重新结算即可更正；
+- 走读生不参加晚修，晚修那一场不计入他的考勤。
+
+结算写的是一条带 `weekKey` 与 `bonusKind: 'weekly'` 的考勤加分记录，计入总积分
+（它没有 `session`，不会被当成晚修那本单独的账）。**可以重复结算**：已发过的按新结果
+更新、现在不该有分的撤回，不会重复加分——所以事后补标记、补录打卡，再结算一次就能更正。
+
+定时触发器 `weeklyAttendanceBonus` 每周一 03:30（北京时间）自动结算上一周、逐班执行；
+教师也可以在考勤页「全勤加分」卡片里随时手动结算某一周。结算是加分操作，**只限教师**，
+班长能看汇总但不能结算。
+
 ### 学生身份：班委与住宿
 
 教师在「学生管理」里为每个学生设置身份，两项互相独立：
@@ -212,6 +248,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | `users` | 账号 | `username`、`phone`、`passwordSalt`、`passwordHash`、`role`、`studentId`、`openid` |
 | `students` | 学生 | `name`、`studentId`、`studentIdAssigned`、`phone`、`className`、`lodging`、`cadreRoles` |
 | `cadreRoles` | 教师补充的班委角色（内置角色不入库） | `key`、`name`、`seq` |
+| `attendanceMarks` | 考勤异常标记 | `studentId`、`className`、`day`、`session`、`status`、`note`、`operator` |
 | `classes` | 班级 | `name`、`createdBy`、`isArchived` |
 | `semesters` | 学期 | `name`、`startDate`、`endDate`、`isCurrent`、`isArchived` |
 | `scoreRecords` | 积分记录 | `studentId`、`semesterId`、`scoreType`、`session`、`score`、`reason`、`operator`、`timestamp`、`day`、`codeId` |
@@ -237,6 +274,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 补考选课 | `retake.select`、`retake.submit` |
 | 积分 | `score.add`、`score.addBatch`、`score.list` |
 | 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.selfCheckin`、`attendance.manualCheckin`、`attendance.today` |
+| 考勤异常与加分 | `attendance.mark`、`attendance.weekSummary`、`attendance.settleWeek` |
 | 身份 | `role.list`、`role.add`、`role.remove`、`student.setIdentity` |
 | 奖励 | `reward.add`、`reward.list`、`reward.redeem`、`reward.unredeem` |
 | 统计 | `stats.overview`、`stats.ranking`、`stats.trend` |

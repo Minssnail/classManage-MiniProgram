@@ -9,6 +9,11 @@
       "name": "weeklyRankingSnapshot",
       "type": "timer",
       "config": "0 0 3 * * MON *"
+    },
+    {
+      "name": "weeklyAttendanceBonus",
+      "type": "timer",
+      "config": "0 30 3 * * MON *"
     }
   ]
 }
