@@ -40,7 +40,7 @@ cloudfunctions/
 4. **设置数据库权限**：云开发控制台 → 数据库 → 逐个集合把权限设为
    **「仅管理端可读写」**：`users` / `students` / `classes` / `semesters` / `scoreRecords` / `rewards` /
    `attendanceCodes` / `majors` / `courses` / `examScores` / `retakeSelections` / `cadreRoles` /
-   `snapshotLogs` / `attendanceMarks`。
+   `snapshotLogs` / `attendanceMarks` / `classSuspensions`。
    后面几个是随功能陆续加的，其中 `examScores` 存的是成绩，尤其不能漏。
    小程序端不直接读写数据库，全部经由云函数，因此关闭客户端权限不影响功能，且能杜绝前端刷分。
 
@@ -166,6 +166,9 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 - **哪天算上课日由考勤码推出来**：当天该场次出过考勤码，就说明这一场确实组织了考勤。
   没出过码的日子（周末、节假日）不计入，不会被判成缺勤；
 - **组织了考勤却没打卡、也没标记的，按无故缺勤计**。教师补录出勤或补标请假后重新结算即可更正；
+- **停课的场次不计入**：课排了、码可能都出了，临时停掉，在考勤页的日期行点该场次即可标停课。
+  停课后学生无需打卡，这一场既不算出勤也不算缺勤，就像没发生过；同时会作废该场次还有效的
+  考勤码，也不能再出码、补录或标记。停课与恢复由教师决定，班长只看得到状态；
 - 走读生不参加晚修，晚修那一场不计入他的考勤；
 - **哪些场次纳入全勤评定按班设置**（班级管理 → 全勤口径）。有的班晚修虽然也考勤，
   但不作为全勤评定依据——这时晚修照常打卡、照常拿那 1 分的晚修加分，只是请假缺勤
@@ -252,6 +255,9 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | `students` | 学生 | `name`、`studentId`、`studentIdAssigned`、`phone`、`className`、`lodging`、`cadreRoles` |
 | `cadreRoles` | 教师补充的班委角色（内置角色不入库） | `key`、`name`、`seq` |
 | `attendanceMarks` | 考勤异常标记 | `studentId`、`className`、`day`、`session`、`status`、`note`、`operator` |
+| `classSuspensions` | 停课记录 | `className`、`day`、`session`、`reason`、`operator` |
+|  | 考勤异常标记 | 、、、、、、 |
+|  | 停课记录 | 、、、、 |
 | `classes` | 班级 | `name`、`createdBy`、`isArchived` |
 | `semesters` | 学期 | `name`、`startDate`、`endDate`、`isCurrent`、`isArchived` |
 | `scoreRecords` | 积分记录 | `studentId`、`semesterId`、`scoreType`、`session`、`score`、`reason`、`operator`、`timestamp`、`day`、`codeId` |
@@ -277,7 +283,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 补考选课 | `retake.select`、`retake.submit` |
 | 积分 | `score.add`、`score.addBatch`、`score.list` |
 | 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.selfCheckin`、`attendance.manualCheckin`、`attendance.today` |
-| 考勤异常与加分 | `attendance.mark`、`attendance.weekSummary`、`attendance.settleWeek` |
+| 考勤异常与加分 | `attendance.mark`、`attendance.suspend`、`attendance.weekSummary`、`attendance.settleWeek` |
 | 身份 | `role.list`、`role.add`、`role.remove`、`student.setIdentity` |
 | 奖励 | `reward.add`、`reward.list`、`reward.redeem`、`reward.unredeem` |
 | 统计 | `stats.overview`、`stats.ranking`、`stats.trend` |

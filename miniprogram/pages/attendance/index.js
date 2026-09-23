@@ -226,6 +226,11 @@ Page({
 
   async onGenerate() {
     if (this.data.generating) return;
+    const suspended = (this.data.todaySummary && this.data.todaySummary.suspendedSessions) || {};
+    if (this.data.isToday && suspended[this.data.session] && suspended[this.data.session].suspended) {
+      util.toast(`今日${this.data.sessionLabel}已停课，如需考勤请先取消停课`);
+      return;
+    }
     this.setData({ generating: true });
     try {
       const ttl = TTL_OPTIONS[this.data.ttlIndex].value;
@@ -349,6 +354,66 @@ Page({
     }
   },
 
+  /**
+   * 停课：这一场不上课，学生无需打卡，也不纳入全勤评定。
+   * 与「当天没出过考勤码」不同——课已经排了甚至码都出了，临时停掉，
+   * 需要一条明确记录把它从统计里摘出去。
+   */
+  async onToggleSuspend(e) {
+    // 班长看得到停课状态，但停不停课是教师定的
+    if (!this.data.isTeacher) {
+      util.toast('停课由任课教师设置');
+      return;
+    }
+    const session = e.currentTarget.dataset.session;
+    const state = (this.data.todaySummary.suspendedSessions || {})[session] || {};
+    const label = session === 'night' ? '晚修' : '面授课';
+    const day = this.data.day;
+
+    if (state.suspended) {
+      const ok = await util.confirm(`恢复 ${day} 的${label}考勤吗？`, '恢复上课');
+      if (!ok) return;
+      try {
+        const res = await api.call('attendance.suspend', {
+          className: this.data.className,
+          day,
+          session,
+          suspended: false,
+        });
+        util.toast(res.message, 'success');
+        await Promise.all([this.loadTodaySummary(), this.loadWeek()]);
+      } catch (err) {
+        // 错误提示已在 api 层弹出
+      }
+      return;
+    }
+
+    const reason = await new Promise((resolve) => {
+      wx.showModal({
+        title: `${label}停课`,
+        content: `${day} 的${label}将标为停课：学生无需打卡，这一场也不计入全勤评定。`,
+        editable: true,
+        placeholderText: '停课原因（选填，如：放假、台风）',
+        success: (res) => resolve(res.confirm ? String(res.content || '') : null),
+        fail: () => resolve(null),
+      });
+    });
+    if (reason === null) return;
+
+    try {
+      const res = await api.call('attendance.suspend', {
+        className: this.data.className,
+        day,
+        session,
+        reason,
+      });
+      util.toast(res.message, 'success');
+      await Promise.all([this.loadTodaySummary(), this.loadWeek()]);
+    } catch (err) {
+      // 错误提示已在 api 层弹出
+    }
+  },
+
   // 翻到别的日期补标记
   onDay(e) {
     const day = e.detail.value;
@@ -404,6 +469,10 @@ Page({
     const row = this.data.todaySummary.students.find((s) => s.studentId === id);
     if (!row) return;
     const state = session === 'night' ? row.nightState : row.dayState;
+    if (state.suspended) {
+      util.toast('这一场已停课，无需考勤');
+      return;
+    }
     if (state.required === false) {
       util.toast(name + ' 是走读生，不参加晚修');
       return;

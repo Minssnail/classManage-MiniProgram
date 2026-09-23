@@ -30,6 +30,7 @@ const COLLECTIONS = [
   'cadreRoles',
   'snapshotLogs',
   'attendanceMarks',
+  'classSuspensions',
 ];
 
 const SCORE_TYPES = ['attendance', 'homework', 'exam', 'activity', 'other'];
@@ -1441,6 +1442,10 @@ actions['attendance.createCode'] = async ({ user, payload }) => {
 
   const className = staff.className;
   if (!className) fail(staff.isTeacher ? '请先选择要考勤的班级' : '你还没有分配班级');
+  const suspendedNow = await isSuspended(className, beijingDay(), normalizeSession(payload.session));
+  if (suspendedNow) {
+    fail(`今日${SESSION_LABELS[normalizeSession(payload.session)]}已停课，如需考勤请先取消停课`);
+  }
   const session = normalizeSession(payload.session);
 
   const now = new Date();
@@ -1577,6 +1582,9 @@ actions['attendance.checkin'] = async ({ user, payload }) => {
   if (session === 'night' && !isBoarder(student.data[0])) {
     fail('你是走读生，无需参加晚修打卡');
   }
+  if (await isSuspended(code.className, beijingDay(now), session)) {
+    fail(`今日${label}已停课，无需打卡`);
+  }
 
   const day = beijingDay(now);
   const done = await attendanceOf(user.studentId, day);
@@ -1678,6 +1686,9 @@ actions['attendance.manualCheckin'] = async ({ user, payload }) => {
   if (session === 'night' && !isBoarder(student.data[0])) {
     fail(`${student.data[0].name}是走读生，无需补录晚修`);
   }
+  if (await isSuspended(student.data[0].className, beijingDay(), session)) {
+    fail(`今日${label}已停课，无需补录`);
+  }
 
   const now = new Date();
   const day = beijingDay(now);
@@ -1726,14 +1737,22 @@ actions['attendance.today'] = async ({ user, payload }) => {
   const markRows = await fetchAll(db.collection('attendanceMarks').where({ day }));
   const marksByKey = {};
   for (const m of markRows) marksByKey[m.studentId + '|' + m.session] = m;
+
+  await ensureCollection('classSuspensions');
+  const suspendRows = await fetchAll(db.collection('classSuspensions').where({ day }));
+  const suspendByClass = {};
+  for (const r of suspendRows) suspendByClass[r.className + '|' + r.session] = r;
   // 走读生不参加晚修：required 为 false，界面显示「走读」而不是「未打卡」
   const stateOf = (student, session) => {
     const r = byKey[student.studentId + '|' + session];
     const mark = marksByKey[student.studentId + '|' + session];
+    const suspended = !!suspendByClass[(student.className || '') + '|' + session];
     return {
       session,
       sessionLabel: SESSION_LABELS[session],
-      required: session !== 'night' || isBoarder(student),
+      suspended,
+      // 停课的场次不必打卡，与走读生不参加晚修一样不计入「还差几场」
+      required: !suspended && (session !== 'night' || isBoarder(student)),
       checkedIn: !!r,
       timestamp: r ? r.timestamp : null,
       reason: r ? r.reason : null,
@@ -1807,10 +1826,17 @@ actions['attendance.today'] = async ({ user, payload }) => {
     counts[x] = inScope.filter((s) => s.sessions.find((v) => v.session === x).checkedIn).length;
   }
 
+  const suspendedSessions = {};
+  for (const s of ATTENDANCE_SESSIONS) {
+    const row = suspendByClass[(className || '') + '|' + s];
+    suspendedSessions[s] = row ? { suspended: true, reason: row.reason || '' } : { suspended: false };
+  }
+
   return {
     day,
     isToday: day === today,
     statuses: Object.keys(MARK_STATUSES).map((k) => ({ key: k, name: MARK_STATUSES[k] })),
+    suspendedSessions,
     className,
     total: list.length,
     // 晚修的应到人数只算住宿生
@@ -1924,6 +1950,112 @@ async function classSessionDays(className, days) {
   return set;
 }
 
+/**
+ * 停课：某个班某天某一场不上课。
+ *
+ * 停课的场次学生无需打卡，也不纳入全勤评定——既不算出勤，也不算缺勤，
+ * 就像这一场没发生过。与「当天没出过考勤码」的区别在于：课已经排了、
+ * 码可能都出了，临时停掉，需要一个明确的记录把它从统计里摘出来。
+ */
+async function suspensionMap(className, days) {
+  await ensureCollection('classSuspensions');
+  const rows = await fetchAll(
+    db.collection('classSuspensions').where({
+      className,
+      day: _.gte(days[0]).and(_.lte(days[days.length - 1])),
+    })
+  );
+  const map = {};
+  for (const r of rows) map[r.day + '|' + r.session] = r;
+  return map;
+}
+
+async function isSuspended(className, day, session) {
+  if (!className) return null;
+  await ensureCollection('classSuspensions');
+  const res = await db
+    .collection('classSuspensions')
+    .where({ className, day, session })
+    .limit(1)
+    .get();
+  return res.data[0] || null;
+}
+
+// 停课是全班的事，也直接影响每个人的加分，因此只由教师决定
+actions['attendance.suspend'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const className = String(payload.className || '').trim();
+  if (!className) fail('请先选择班级');
+  const day = String(payload.day || '').trim() || beijingDay();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) fail('日期格式不正确');
+
+  const raw = String(payload.session || '').trim();
+  const sessions =
+    raw === 'all' || !raw ? ATTENDANCE_SESSIONS.slice() : [normalizeSession(raw)];
+  const suspended = payload.suspended !== false;
+  const reason = String(payload.reason || '').trim();
+
+  await ensureCollection('classSuspensions');
+  let revoked = 0;
+  for (const session of sessions) {
+    const existing = await db
+      .collection('classSuspensions')
+      .where({ className, day, session })
+      .get();
+
+    if (!suspended) {
+      for (const row of existing.data) {
+        await db.collection('classSuspensions').doc(row._id).remove();
+      }
+      continue;
+    }
+
+    const data = {
+      className,
+      day,
+      session,
+      reason,
+      operator: user.username,
+      updatedAt: new Date(),
+    };
+    if (existing.data.length) {
+      await db.collection('classSuspensions').doc(existing.data[0]._id).update({ data });
+      for (const extra of existing.data.slice(1)) {
+        await db.collection('classSuspensions').doc(extra._id).remove();
+      }
+    } else {
+      await db.collection('classSuspensions').add({ data });
+    }
+
+    // 停课了就不该再有人扫码，把这一场还有效的码一并作废
+    const live = await fetchAll(
+      db.collection('attendanceCodes').where({
+        className,
+        day,
+        revoked: _.neq(true),
+        expireAt: _.gt(new Date()),
+      })
+    );
+    for (const code of live) {
+      if ((code.session || DEFAULT_SESSION) !== session) continue;
+      await db.collection('attendanceCodes').doc(code._id).update({ data: { revoked: true } });
+      revoked++;
+    }
+  }
+
+  const labels = sessions.map((s) => SESSION_LABELS[s]).join('、');
+  return {
+    className,
+    day,
+    sessions,
+    suspended,
+    revoked,
+    message: suspended
+      ? `${day} ${labels}已停课，学生无需打卡` + (revoked ? `，已作废 ${revoked} 张考勤码` : '')
+      : `${day} ${labels}已恢复上课`,
+  };
+};
+
 actions['attendance.mark'] = async ({ user, payload }) => {
   const staff = await requireAttendanceStaff(user, payload);
   const studentId = String(payload.studentId || '').trim();
@@ -1938,6 +2070,9 @@ actions['attendance.mark'] = async ({ user, payload }) => {
   if (!student) fail('学生不存在');
   if (!staff.isTeacher && student.className !== staff.className) fail('只能标记本班的学生');
   if (session === 'night' && !isBoarder(student)) fail(`${student.name}是走读生，不参加晚修`);
+  if (await isSuspended(student.className, day, session)) {
+    fail(`${day} ${SESSION_LABELS[session]}已停课，无需标记考勤`);
+  }
 
   await ensureCollection('attendanceMarks');
   const key = { studentId, day, session };
@@ -2002,6 +2137,7 @@ async function computeWeek(className, weekStartInput, user) {
 
   const cls = await getClassDoc(className);
   const countedSessions = weeklySessionsOf(cls);
+  const suspensions = await suspensionMap(className, days);
 
   const [students, marks, sessionDays, scores] = await Promise.all([
     fetchAll(db.collection('students').where({ className }).orderBy('name', 'asc')),
@@ -2033,6 +2169,8 @@ async function computeWeek(className, weekStartInput, user) {
     for (const day of days) {
       for (const session of countedSessions) {
         if (!sessionDays.has(day + '|' + session)) continue;
+        // 停课的场次既不算出勤也不算缺勤，当它没发生过
+        if (suspensions[day + '|' + session]) continue;
         // 走读生不参加晚修，晚修那一场不计入他的考勤
         if (session === 'night' && !isBoarder(s)) continue;
 
@@ -2100,7 +2238,13 @@ async function computeWeek(className, weekStartInput, user) {
     weekLabel: weekLabel(weekStart),
     days,
     // 这一周本班一共组织了几场纳入全勤评定的考勤，0 场时不该结算
-    sessionTotal: [...sessionDays].filter((k) => countedSessions.indexOf(k.split('|')[1]) >= 0).length,
+    sessionTotal: [...sessionDays].filter(
+      (k) => countedSessions.indexOf(k.split('|')[1]) >= 0 && !suspensions[k]
+    ).length,
+    // 被停掉的场次单独说明，免得「少了几场」看不出原因
+    suspendedCount: Object.keys(suspensions).filter(
+      (k) => countedSessions.indexOf(k.split('|')[1]) >= 0 && sessionDays.has(k)
+    ).length,
     isCurrentWeek: weekStart === weekStartOf(today),
     statuses: Object.keys(MARK_STATUSES).map((k) => ({ key: k, name: MARK_STATUSES[k] })),
     students: rows,

@@ -165,6 +165,22 @@
           <text wx:if="{{!isToday}}" class="link" bindtap="onBackToToday">回到今天</text>
           <text wx:else class="muted">今天</text>
         </view>
+
+        <view class="suspend-row" wx:if="{{todaySummary.suspendedSessions}}">
+          <view
+            wx:for="{{sessions}}"
+            wx:key="key"
+            class="suspend-chip {{todaySummary.suspendedSessions[item.key].suspended ? 'off' : ''}}"
+            data-session="{{item.key}}"
+            bindtap="onToggleSuspend"
+          >
+            {{item.label}}：{{todaySummary.suspendedSessions[item.key].suspended ? '已停课' : '正常上课'}}
+            <text wx:if="{{todaySummary.suspendedSessions[item.key].reason}}" class="suspend-reason">（{{todaySummary.suspendedSessions[item.key].reason}}）</text>
+          </view>
+        </view>
+        <view class="muted list-tip" wx:if="{{isTeacher}}">
+          点上面的场次可切换停课。停课后学生无需打卡，这一场也不计入全勤评定。
+        </view>
         <view class="session-sum" wx:if="{{todaySummary.sessionCounts}}">
           <text class="badge badge-brand">
             面授课 {{todaySummary.sessionCounts.day}}<text wx:if="{{todaySummary.sessionTotals}}"> / {{todaySummary.sessionTotals.day}}</text>
@@ -194,7 +210,8 @@
               bindtap="onCell"
             >
               <text class="session-tag">面授</text>
-              <text wx:if="{{item.dayState.status}}" class="badge {{item.dayState.status === 'leave' ? 'badge-brand' : 'badge-danger'}}">{{item.dayState.statusLabel}}</text>
+              <text wx:if="{{item.dayState.suspended}}" class="badge badge-muted">停课</text>
+              <text wx:elif="{{item.dayState.status}}" class="badge {{item.dayState.status === 'leave' ? 'badge-brand' : 'badge-danger'}}">{{item.dayState.statusLabel}}</text>
               <text wx:elif="{{item.dayState.checkedIn}}" class="badge badge-success">已打卡</text>
               <text wx:else class="badge badge-muted">未打卡</text>
             </view>
@@ -206,7 +223,8 @@
               bindtap="onCell"
             >
               <text class="session-tag">晚修</text>
-              <text wx:if="{{item.nightState.required === false}}" class="badge badge-muted">走读</text>
+              <text wx:if="{{item.nightState.suspended}}" class="badge badge-muted">停课</text>
+              <text wx:elif="{{item.nightState.required === false}}" class="badge badge-muted">走读</text>
               <text wx:elif="{{item.nightState.status}}" class="badge {{item.nightState.status === 'leave' ? 'badge-brand' : 'badge-danger'}}">{{item.nightState.statusLabel}}</text>
               <text wx:elif="{{item.nightState.checkedIn}}" class="badge badge-success">已打卡</text>
               <text wx:else class="badge badge-muted">未打卡</text>
@@ -224,7 +242,9 @@
         </view>
         <view class="week-bar">
           <text class="link" data-delta="-1" bindtap="onWeekShift">‹ 上一周</text>
-          <text class="muted">计入 {{week.countedText}} · 共 {{week.sessionTotal}} 场</text>
+          <text class="muted">
+            计入 {{week.countedText}} · 共 {{week.sessionTotal}} 场<text wx:if="{{week.suspendedCount}}">（另停课 {{week.suspendedCount}} 场）</text>
+          </text>
           <text class="link" data-delta="1" bindtap="onWeekShift">下一周 ›</text>
         </view>
 
@@ -254,7 +274,7 @@
           <view class="muted list-tip">
             一周内全勤加 3 分，请假一天加 2 分、两天加 1 分；迟到早退累计 2 次及以上，或有无故缺勤的不加分。
             请假按天算——同一天面授与晚修都请假仍只算一天；迟到早退按次累计。
-            组织了考勤却没打卡、也没标记的，按无故缺勤计。
+            组织了考勤却没打卡、也没标记的，按无故缺勤计；停课的场次不计入，既不算出勤也不算缺勤。
             <block wx:if="{{!week.nightCounted}}">本班晚修不计入全勤评定（在「班级管理 → 全勤口径」里设置），晚修打卡仍照常记晚修加分。</block>
           </view>
 
