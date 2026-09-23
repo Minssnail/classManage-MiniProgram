@@ -216,7 +216,7 @@
               <text wx:else class="badge badge-muted">未打卡</text>
             </view>
             <view
-              class="session-cell {{item.nightState.required === false ? '' : 'tappable'}}"
+              class="session-cell {{item.lodging === 'commuting' ? '' : 'tappable'}}"
               data-id="{{item.studentId}}"
               data-name="{{item.name}}"
               data-session="night"
@@ -224,7 +224,7 @@
             >
               <text class="session-tag">晚修</text>
               <text wx:if="{{item.nightState.suspended}}" class="badge badge-muted">停课</text>
-              <text wx:elif="{{item.nightState.required === false}}" class="badge badge-muted">走读</text>
+              <text wx:elif="{{item.lodging === 'commuting'}}" class="badge badge-muted">走读</text>
               <text wx:elif="{{item.nightState.status}}" class="badge {{item.nightState.status === 'leave' ? 'badge-brand' : 'badge-danger'}}">{{item.nightState.statusLabel}}</text>
               <text wx:elif="{{item.nightState.checkedIn}}" class="badge badge-success">已打卡</text>
               <text wx:else class="badge badge-muted">未打卡</text>

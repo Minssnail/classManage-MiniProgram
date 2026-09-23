@@ -71,6 +71,21 @@ function buildExceptions(detail) {
   return out;
 }
 
+/**
+ * 这一格能不能操作；不能的话给出确切原因。
+ *
+ * 不要从 required 反推原因：required 为 false 既可能是走读生不参加晚修，
+ * 也可能是这一场停课了，混在一起就会把「已停课」说成「是走读生」。
+ * 是不是走读生看学生本人的住宿情况，与 required 无关。
+ */
+function cellBlockReason(row, state, session) {
+  if (state && state.suspended) return '这一场已停课，无需考勤';
+  if (session === 'night' && row && row.lodging === 'commuting') {
+    return (row.name || '该学生') + ' 是走读生，不参加晚修';
+  }
+  return null;
+}
+
 function stopRefresh() {
   wx.stopPullDownRefresh();
 }
@@ -509,13 +524,10 @@ Page({
     const { id, session, name } = e.currentTarget.dataset;
     const row = this.data.todaySummary.students.find((s) => s.studentId === id);
     if (!row) return;
-    const state = session === 'night' ? row.nightState : row.dayState;
-    if (state.suspended) {
-      util.toast('这一场已停课，无需考勤');
-      return;
-    }
-    if (state.required === false) {
-      util.toast(name + ' 是走读生，不参加晚修');
+    const state = (session === 'night' ? row.nightState : row.dayState) || {};
+    const blocked = cellBlockReason(row, state, session);
+    if (blocked) {
+      util.toast(blocked);
       return;
     }
 
