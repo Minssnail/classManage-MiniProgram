@@ -403,7 +403,7 @@ Page({
   async onToggleSuspend(e) {
     // 班长看得到停课状态，但停不停课是教师定的
     if (!this.data.isTeacher) {
-      util.toast('停课由任课教师设置');
+      util.toast('停课由班主任设置');
       return;
     }
     const session = e.currentTarget.dataset.session;

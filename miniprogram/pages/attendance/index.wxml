@@ -191,7 +191,7 @@
         </view>
         <view class="muted list-tip">
           点任意一格可标记请假、迟到、早退、缺勤<block wx:if="{{isTeacher}}">，或补录出勤</block>。
-          <block wx:if="{{isMonitor}}">补录出勤请联系任课教师。</block>
+          <block wx:if="{{isMonitor}}">补录出勤请联系班主任。</block>
         </view>
 
         <view wx:for="{{todaySummary.students}}" wx:key="rowKey" class="list-item">
@@ -294,7 +294,7 @@
               重算以往各周
             </button>
           </view>
-          <view wx:else class="muted list-tip">结算加分由任课教师操作。</view>
+          <view wx:else class="muted list-tip">结算加分由班主任操作。</view>
         </block>
       </view>
     </block>
