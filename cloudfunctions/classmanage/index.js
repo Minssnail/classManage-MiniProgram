@@ -2215,13 +2215,17 @@ async function computeWeek(className, weekStartInput, user) {
 
     for (const day of days) {
       for (const session of countedSessions) {
-        if (!sessionDays.has(day + '|' + session)) continue;
+        const key = day + '|' + session;
         // 停课的场次既不算出勤也不算缺勤，当它没发生过
-        if (suspensions[day + '|' + session]) continue;
+        if (suspensions[key]) continue;
         // 走读生不参加晚修，晚修那一场不计入他的考勤
         if (session === 'night' && !isBoarder(s)) continue;
 
         const mark = marks[s.studentId + '|' + day + '|' + session];
+        // 本班这一场组织过考勤，或者教师明确给这个人标了情况。
+        // 后者不能漏：临时改线上、忘了出码的场次照样会有人请假，
+        // 只认「出过码」的话，标了请假却不算数，教师会以为没同步
+        if (!sessionDays.has(key) && !mark) continue;
         const didCheck = checked.has(s.studentId + '|' + day + '|' + session);
         let status;
         if (mark) status = mark.status;
