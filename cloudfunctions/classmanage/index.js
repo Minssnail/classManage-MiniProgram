@@ -1724,6 +1724,45 @@ actions['attendance.manualCheckin'] = async ({ user, payload }) => {
 };
 
 // 今日考勤概况：面授课与晚修分开统计，学生看自己的状态，教师看全班名单
+/**
+ * 撤销某人某天某一场的打卡记录。
+ *
+ * 补错了日期、扫错了码、记到了不该记的人头上，都需要能收回——
+ * 否则只能去数据库里删。连同那 1 分一起撤掉，周汇总随之重算。
+ */
+actions['attendance.undoCheckin'] = async ({ user, payload }) => {
+  requireTeacher(user);
+  const studentId = String(payload.studentId || '').trim();
+  if (!studentId) fail('缺少学号');
+  const session = normalizeSession(payload.session);
+  const label = SESSION_LABELS[session];
+
+  const today = beijingDay();
+  const day = String(payload.day || '').trim() || today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) fail('日期格式不正确');
+
+  const student = await db.collection('students').where({ studentId }).limit(1).get();
+  if (!student.data.length) fail('学生不存在');
+
+  const rows = await fetchAll(
+    db.collection('scoreRecords').where({ studentId, scoreType: 'attendance', day })
+  );
+  // 周加分也是考勤记录，但它不是某一场的打卡，别误删
+  const hit = rows.filter((r) => r.bonusKind !== 'weekly' && (r.session || DEFAULT_SESSION) === session);
+  if (!hit.length) fail(`${student.data[0].name} ${day} ${label}没有打卡记录`);
+
+  for (const r of hit) await db.collection('scoreRecords').doc(r._id).remove();
+
+  return {
+    studentId,
+    day,
+    session,
+    removed: hit.length,
+    reasons: hit.map((r) => r.reason),
+    message: `已撤销 ${student.data[0].name} ${day} ${label}的打卡，扣回 ${hit.reduce((n, r) => n + (r.score || 0), 0)} 分`,
+  };
+};
+
 actions['attendance.today'] = async ({ user, payload }) => {
   requireLogin(user);
   // 默认今天，也可以翻到别的日期补标记

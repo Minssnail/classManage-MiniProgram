@@ -521,6 +521,8 @@ Page({
 
     const actions = [];
     if (this.data.isTeacher && !state.checkedIn) actions.push({ key: 'checkin', label: '补录出勤' });
+    // 补错日期、扫错码都需要能收回
+    if (this.data.isTeacher && state.checkedIn) actions.push({ key: 'undo', label: '撤销出勤' });
     for (const s of MARK_STATUSES) {
       if (s.key !== state.status) actions.push({ key: 'mark', status: s.key, label: '标记' + s.name });
     }
@@ -536,7 +538,19 @@ Page({
     if (!picked) return;
 
     try {
-      if (picked.key === 'checkin') {
+      if (picked.key === 'undo') {
+        const ok = await util.confirm(
+          `将撤销 ${name} ${this.data.day} ${session === 'night' ? '晚修' : '面授课'}的打卡记录，并扣回相应的 1 分。`,
+          '撤销出勤'
+        );
+        if (!ok) return;
+        const res = await api.call('attendance.undoCheckin', {
+          studentId: id,
+          day: this.data.day || undefined,
+          session,
+        });
+        util.toast(res.message, 'success');
+      } else if (picked.key === 'checkin') {
         // 补的是当前查看的那一天，不是今天
         const res = await api.call('attendance.manualCheckin', {
           studentId: id,

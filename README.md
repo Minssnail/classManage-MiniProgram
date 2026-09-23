@@ -143,7 +143,9 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 
 ### 考勤异常与全勤加分
 
-教师与班长可以在考勤名单里点任意一格，标记**请假 / 迟到 / 早退 / 缺勤**；
+教师与班长可以在考勤名单里点任意一格，标记**请假 / 迟到 / 早退 / 缺勤**；教师还能补录出勤或撤销打卡。
+**补录与标记都作用于当前查看的那一天**，不是今天——名单能翻日期，补录却写成今天的话，
+看的那天仍是未打卡、周汇总里的缺勤也不会消，而今天会凭空多出一条。
 名单顶部可切换日期，事后补标。教师还能在同一处补录出勤。
 只有这四种状态——每一种在全勤规则里都有明确含义，随意增加会让加分无从判定。
 
@@ -285,7 +287,7 @@ Web 版允许学生点「我要打卡」自行打卡，容易缺勤代打。小�
 | 课程成绩 | `academic.import`、`major.list`、`course.list`、`course.todo`、`course.exportTodo`、`exam.list`、`exam.summary`、`exam.pending`、`exam.exportRetake` |
 | 补考选课 | `retake.select`、`retake.submit` |
 | 积分 | `score.add`、`score.addBatch`、`score.list` |
-| 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.selfCheckin`、`attendance.manualCheckin`、`attendance.today` |
+| 考勤 | `attendance.createCode`、`attendance.codeStatus`、`attendance.revokeCode`、`attendance.checkin`、`attendance.selfCheckin`、`attendance.manualCheckin`、`attendance.undoCheckin`、`attendance.today` |
 | 考勤异常与加分 | `attendance.mark`、`attendance.suspend`、`attendance.weekSummary`、`attendance.settleWeek`、`attendance.settleHistory` |
 | 身份 | `role.list`、`role.add`、`role.remove`、`student.setIdentity` |
 | 奖励 | `reward.add`、`reward.list`、`reward.redeem`、`reward.unredeem` |
